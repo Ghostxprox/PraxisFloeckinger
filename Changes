@@ -1,0 +1,68 @@
+# Changes
+
+---
+
+## Session 1 — 2026-04-25
+
+### Solution-Skeleton aufgebaut
+
+**dotnet new sln -n PraxisFloeckinger**
+- Solution-Datei `PraxisFloeckinger.slnx` erstellt (neues slnx-Format, erzeugt durch .NET 10 SDK)
+
+**7 Projekte angelegt (dotnet new ...)**
+- `src/PraxisFloeckinger.Core/` — classlib, reine Domain-Schicht
+- `src/PraxisFloeckinger.Shared/` — classlib, DTOs und Konstanten
+- `src/PraxisFloeckinger.Infrastructure/` — classlib, EF Core / Repositories
+- `src/PraxisFloeckinger.Api/` — webapi, REST-API (Hetzner)
+- `src/PraxisFloeckinger.Web/` — web, Public Site + Patientenportal
+- `src/PraxisFloeckinger.Praxis/` — web, lokale Praxis-Software (Mac mini)
+- `tests/PraxisFloeckinger.Tests/` — xunit, Testprojekt
+
+**Projekt-Referenzen gesetzt**
+- Infrastructure → Core, Shared
+- Api → Infrastructure, Shared
+- Web → Shared
+- Praxis → Core, Shared (strikte Regel: niemals Api oder Infrastructure)
+- Tests → Core, Infrastructure, Shared
+
+**Directory.Build.props** erstellt (Solution-Root)
+- TargetFramework: net9.0
+- Nullable: enable
+- ImplicitUsings: enable
+- TreatWarningsAsErrors: true
+- EnforceCodeStyleInBuild: true
+- LangVersion: latest
+- NeutralLanguage: de-AT
+
+**Alle .csproj-Dateien bereinigt**
+- Doppelte Properties (TargetFramework, Nullable, ImplicitUsings) entfernt — kommen jetzt aus Directory.Build.props
+- `Microsoft.AspNetCore.OpenApi Version="10.0.7"` aus Api.csproj entfernt (net10.0-Paket, inkompatibel mit net9.0-Target)
+- `FluentAssertions 7.2.0` zu Tests.csproj hinzugefügt
+
+**src/PraxisFloeckinger.Api/Program.cs** ersetzt
+- Generierten WeatherForecast-Platzhalter durch minimalen Health-Endpoint ersetzt (kein OpenAPI-Package nötig)
+
+**.editorconfig** erstellt
+- .NET-Standard Code Style (var-Regeln, expression bodies, pattern matching)
+- Naming Conventions (Interface I-Prefix, private _camelCase, const PascalCase)
+
+**CLAUDE.md** ergänzt
+- Neuer Abschnitt "Projekt-Referenz-Regeln" mit erlaubten Abhängigkeiten und TODO für NetArchTest
+
+**docs/adr/_template.md** erstellt
+- ADR-Vorlage: Status / Context / Decision / Consequences / Alternatives Considered
+
+**docs/adr/0001-database-per-tenant.md** erstellt
+- ADR: Database-per-Tenant-Entscheidung dokumentiert (Begründung, Alternativen, Trade-offs)
+
+**.gitignore** erstellt
+- `dotnet new gitignore` (Standard .NET gitignore)
+- `PraxisFloeckinger/` Unterordner ausgeschlossen (verschachtelter alter Git-Repo-Versuch)
+
+**Git-Repository initialisiert**
+- `git init` — lokales Repo auf Branch `master`, dann zu `main` umbenannt
+- Erster Commit: `ee10364 chore: initialize solution skeleton`
+- Remote `origin` hinzugefügt: https://github.com/Ghostxprox/PraxisFloeckinger.git
+- `git push -u origin main` — Branch auf GitHub gepusht
+
+---
