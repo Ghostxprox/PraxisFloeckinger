@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <LangVersion>latest</LangVersion>
+    <NeutralLanguage>de-AT</NeutralLanguage>
+    <Authors>Tobias Flöckinger</Authors>
+    <Company>Praxis Flöckinger</Company>
+    <Copyright>Copyright © 2026 Tobias Flöckinger</Copyright>
+  </PropertyGroup>
+</Project>

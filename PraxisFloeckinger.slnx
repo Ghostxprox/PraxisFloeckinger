@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PraxisFloeckinger.Api/PraxisFloeckinger.Api.csproj" />
+    <Project Path="src/PraxisFloeckinger.Core/PraxisFloeckinger.Core.csproj" />
+    <Project Path="src/PraxisFloeckinger.Infrastructure/PraxisFloeckinger.Infrastructure.csproj" />
+    <Project Path="src/PraxisFloeckinger.Praxis/PraxisFloeckinger.Praxis.csproj" />
+    <Project Path="src/PraxisFloeckinger.Shared/PraxisFloeckinger.Shared.csproj" />
+    <Project Path="src/PraxisFloeckinger.Web/PraxisFloeckinger.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PraxisFloeckinger.Tests/PraxisFloeckinger.Tests.csproj" />
+  </Folder>
+</Solution>

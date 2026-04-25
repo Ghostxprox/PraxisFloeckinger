@@ -1,0 +1,6 @@
+@PraxisFloeckinger.Api_HostAddress = http://localhost:5073
+
+GET {{PraxisFloeckinger.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\PraxisFloeckinger.Core\PraxisFloeckinger.Core.csproj" />
+    <ProjectReference Include="..\PraxisFloeckinger.Shared\PraxisFloeckinger.Shared.csproj" />
+  </ItemGroup>
+
+</Project>
