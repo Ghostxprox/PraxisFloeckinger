@@ -14,14 +14,14 @@ und alle Konventionen für dieses Projekt.
 
 ## Aktueller Projekt-Stand
 
-- Workspace ist leer (frische .NET 9 Solution wird gerade aufgebaut).
-- Eine alte ASP.NET MVC-App existiert im Verzeichnis `../Old/` außerhalb
-  dieses Workspaces. Sie enthält bereits:
-    - Marketing-Seiten (Karriere-Timeline, Coaching mit PriceConfig)
-    - Razor-Layout und CSS
-  Diese Inhalte sollen später in das neue `PraxisFloeckinger.Web`-Projekt
-  übernommen werden, aber nicht jetzt — erst wenn die Solution-Struktur
-  und Multi-Tenant-Foundation steht.
+- Solution-Skeleton steht (Schritt 1 abgeschlossen): 7 Projekte in
+  src/ und tests/, Directory.Build.props auf Solution-Root,
+  .editorconfig, ADR-Template, erster ADR (0001-database-per-tenant),
+  GitHub-Repo (privat) initialisiert.
+- Aktueller Stand: Schritt 2 (Core-Domäne) steht an.
+- Eine alte ASP.NET MVC-App liegt unter ../Old/ als Referenz (Marketing-Seiten,
+  Karriere-Timeline, Coaching mit PriceConfig, Razor-Layout, CSS). Wird erst
+  nach der Multi-Tenant-Foundation in PraxisFloeckinger.Web überführt.
 - Geplante finale Solution-Struktur (siehe Leitfaden §5 / Roadmap):
     - PraxisFloeckinger.Api          (Web API, Hetzner)
     - PraxisFloeckinger.Web          (Public Site + Patientenportal)
@@ -29,7 +29,7 @@ und alle Konventionen für dieses Projekt.
     - PraxisFloeckinger.Core         (Domain Models, Interfaces)
     - PraxisFloeckinger.Infrastructure (EF Core, Postgres, Repos)
     - PraxisFloeckinger.Shared       (DTOs, Konstanten)
-    - PraxisFloeckinger.Testsdotnet --version
+    - PraxisFloeckinger.Tests
 
 ## Coding-Konventionen (siehe Leitfaden §10)
 - Nullable reference types ON
