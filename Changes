@@ -2,6 +2,54 @@
 
 ---
 
+## 2026-04-25 — Foundation Cleanup + Schritt 2: Core-Domäne
+
+**global.json** angelegt
+- SDK auf 9.0.203 gepinnt (`rollForward: latestFeature`, kein Sprung auf .NET 10)
+
+**tests/PraxisFloeckinger.Tests/PraxisFloeckinger.Tests.csproj**
+- FluentAssertions entfernt, AwesomeAssertions 9.4.0 (MIT-Fork) hinzugefügt
+
+**src/PraxisFloeckinger.Core/Class1.cs, src/PraxisFloeckinger.Infrastructure/Class1.cs, src/PraxisFloeckinger.Shared/Class1.cs**
+- Template-Platzhalter gelöscht
+
+**Commit:** `574eb6a chore: pin .NET 9 SDK, switch to AwesomeAssertions, remove template scaffolding`
+
+---
+
+**src/PraxisFloeckinger.Core/Common/**
+- `EntityBase.cs` — abstrakte Basisklasse: Guid Id (auto), DateTimeOffset CreatedAt (auto UTC), CreatedBy/ModifiedAt/ModifiedBy
+- `SoftDeletableEntityBase.cs` — erweitert EntityBase: IsDeleted, DeletedAt, DeletedBy
+- `IAuditable.cs` — Marker-Interface für Audit-Log-Pflicht
+- `ITenantScoped.cs` — Marker-Interface für Tenant-DB-Entitäten
+
+**src/PraxisFloeckinger.Core/Tenancy/**
+- `ITenantContext.cs` — Interface: TenantId, Subdomain, ConnectionString
+- `TenantInfo.cs` — sealed record, implementiert ITenantContext
+
+**src/PraxisFloeckinger.Core/Identity/**
+- `UserRole.cs` — Enum mit stabilen Werten (Patient=1 .. SystemAdmin=6)
+
+**src/PraxisFloeckinger.Core/Therapy/**
+- `TherapyMode.cs` — Enum (Anzug=1 .. Sportbegleitet=8)
+- `AppointmentStatus.cs` — Enum (Booked=1 .. NoShow=4)
+- `SlotStatus.cs` — Enum (Free=1 .. Blocked=3)
+- `EmergencyRequestStatus.cs` — Enum (Pending=1 .. CounterProposed=4)
+
+**src/PraxisFloeckinger.Core/Compliance/**
+- `AuditAction.cs` — Enum (Create=1 .. Print=8)
+
+**tests/PraxisFloeckinger.Tests/Core/**
+- `EntityBaseTests.cs` — 8 Tests: Id-Autogenerierung, distinct IDs, CreatedAt UTC, Soft-Delete-Defaults
+- `EnumStabilityTests.cs` — 6 Tests: pinnt alle Enum-Werte gegen versehentliches Umordnen
+
+**dotnet build** — 0 Warnings, 0 Errors
+**dotnet test** — 15/15 grün
+
+**Commit:** `ccd5f24 feat(core): add domain foundation with base entities, tenancy interfaces and stable enums`
+
+---
+
 ## 2026-04-25 — Cleanup-Commit vor Schritt 2
 
 **CLAUDE.md** bereinigt
