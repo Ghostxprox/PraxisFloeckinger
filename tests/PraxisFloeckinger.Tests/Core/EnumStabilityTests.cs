@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using PraxisFloeckinger.Core.Compliance;
 using PraxisFloeckinger.Core.Identity;
+using PraxisFloeckinger.Core.Tenancy;
 using PraxisFloeckinger.Core.Therapy;
 
 namespace PraxisFloeckinger.Tests.Core;
@@ -59,6 +60,25 @@ public class EnumStabilityTests
         ((int)EmergencyRequestStatus.Approved).Should().Be(2);
         ((int)EmergencyRequestStatus.Rejected).Should().Be(3);
         ((int)EmergencyRequestStatus.CounterProposed).Should().Be(4);
+    }
+
+    [Fact]
+    public void LicenseTier_ValuesAreStable()
+    {
+        ((int)LicenseTier.Trial).Should().Be(1);
+        ((int)LicenseTier.Standard).Should().Be(2);
+        ((int)LicenseTier.Professional).Should().Be(3);
+        ((int)LicenseTier.Enterprise).Should().Be(4);
+    }
+
+    [Fact]
+    public void LicenseEventType_ValuesAreStable()
+    {
+        ((int)LicenseEventType.TrialStarted).Should().Be(1);
+        ((int)LicenseEventType.Activated).Should().Be(2);
+        ((int)LicenseEventType.Renewed).Should().Be(3);
+        ((int)LicenseEventType.Suspended).Should().Be(4);
+        ((int)LicenseEventType.Cancelled).Should().Be(5);
     }
 
     [Fact]
