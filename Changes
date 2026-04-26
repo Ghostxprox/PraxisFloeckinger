@@ -2,6 +2,19 @@
 
 ---
 
+## 2026-04-25 — Cleanup-Commit vor Schritt 2
+
+**CLAUDE.md** bereinigt
+- Doppelpunkt-Tippfehler (`nicht jetzt.. Sie`) behoben
+- Redundanten Old/-Absatz dedupliziert (stand zweimal drin)
+- Abschnitt "Aktueller Projekt-Stand" spiegelt jetzt Post-Schritt-1-Zustand wider (war bereits vom User vorbereitet)
+
+**dotnet build** — 0 Warnings, 0 Errors bestätigt
+
+**Commit:** `8a4d655 docs: clean up CLAUDE.md after step 1` → gepusht
+
+---
+
 ## Session 1 — 2026-04-25
 
 ### Solution-Skeleton aufgebaut
