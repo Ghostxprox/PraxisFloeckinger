@@ -2,6 +2,52 @@
 
 ---
 
+## 2026-04-26 — dotnet-ef Tool-Pinning + Schritt 3: Infrastructure / Master-DB
+
+**Commit:** `6c2cb75 chore: pin dotnet-ef as local tool (EF Core 9)`
+- `.config/dotnet-tools.json` angelegt — dotnet-ef 9.0.15 als lokales Tool gepinnt
+- Ausführung via `dotnet tool run dotnet-ef`
+
+**docker-compose.yml** angelegt
+- Service postgres:16-alpine, Port 5432, Volume pgdata, Healthcheck (pg_isready), Restart unless-stopped
+- POSTGRES_PASSWORD kommt aus `.env` (nicht committet)
+
+**.env.example** angelegt (Template für lokale Dev-Credentials)
+
+**README.md** angelegt
+- Local Setup: docker compose up, dotnet tool restore, dotnet ef database update, dotnet test
+
+**src/PraxisFloeckinger.Core** — neue Entities (Master-DB, kein ITenantScoped):
+- `Tenancy/LicenseTier.cs` — Enum (Trial=1..Enterprise=4, stabile Werte)
+- `Tenancy/LicenseEventType.cs` — Enum (TrialStarted=1..Cancelled=5, stabile Werte)
+- `Tenancy/Tenant.cs` — Subdomain (unique, init), DisplayName, DbConnectionRef (init), LicenseTier, IsActive
+- `Tenancy/LicenseEvent.cs` — TenantId FK, EventType, EffectiveAt, Note
+- `Identity/SystemAdmin.cs` — Email (unique), FullName, PasswordHash (Argon2id), TotpEnabled, TotpSecret
+
+**src/PraxisFloeckinger.Infrastructure** — neue Pakete + Persistence:
+- EF Core 9.0.15, Npgsql 9.0.4, Microsoft.Extensions.Configuration.Abstractions 9.0.15
+- Microsoft.EntityFrameworkCore.Design 9.0.15 (PrivateAssets=all) in Infrastructure + Api
+- `Persistence/Master/MasterDbContext.cs` — DbSets für Tenants/LicenseEvents/SystemAdmins, Unique Indexes, MaxLength, Soft-Delete Global Query Filter für SystemAdmin
+- `Persistence/Master/MasterDbContextFactory.cs` — IDesignTimeDbContextFactory für dotnet-ef
+- `Persistence/Master/Migrations/20260426162329_InitialMaster` — erste Migration (nur generiert, nicht applied)
+
+**src/PraxisFloeckinger.Api/appsettings.Development.json** — ConnectionStrings:Master hinzugefügt
+**src/PraxisFloeckinger.Api/appsettings.json** — leerer Master-ConnectionString-Platzhalter
+
+**tests/PraxisFloeckinger.Tests** — Testcontainers 4.11.0 hinzugefügt
+- `UnitTest1.cs` gelöscht
+- `Core/EnumStabilityTests.cs` — LicenseTier + LicenseEventType ergänzt
+- `Infrastructure/MasterDbContextTests.cs` — 7 Tests gegen echte Postgres via Testcontainers:
+  AllMigrations_Apply, Tenant_Create/Read, Subdomain_Uniqueness, LicenseEvent_Create,
+  SystemAdmin_SoftDelete_Filter, SoftDelete_IgnoreQueryFilters, Email_Uniqueness
+
+**dotnet build** — 0 Fehler (1 MSB3277 MSBuild-Warning wegen Testcontainers/EF-Abhängigkeitskonflikt, kein Roslyn-Error)
+**dotnet test** — 23/23 grün (inkl. Testcontainers gegen postgres:16-alpine)
+
+**Commit:** `1bab87f feat(infra): add master DbContext with tenants, license events, system admins; first migration`
+
+---
+
 ## 2026-04-25 — Foundation Cleanup + Schritt 2: Core-Domäne
 
 **global.json** angelegt
