@@ -7,6 +7,12 @@
   <ItemGroup>
     <PackageReference Include="AwesomeAssertions" Version="9.4.0" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.*" />
+    <!--
+      Microsoft.AspNetCore.Mvc.Testing 9.0.1 zieht Microsoft.EntityFrameworkCore.Relational 9.0.1 rein,
+      während Infrastructure EF Core 9.0.15 verwendet → MSB3277 Diamond-Konflikt.
+      Diese explizite Referenz fixiert die Version auf den höchsten 9.x-Patch und löst den Konflikt.
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.*" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.*" />
