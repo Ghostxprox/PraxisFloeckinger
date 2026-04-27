@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using PraxisFloeckinger.Api.Tenancy;
 using PraxisFloeckinger.Core.Tenancy;
 using PraxisFloeckinger.Infrastructure.Persistence.Master;
+using PraxisFloeckinger.Infrastructure.Persistence.Tenant;
 using PraxisFloeckinger.Infrastructure.Tenancy;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +20,11 @@ builder.Services.AddDbContext<MasterDbContext>(options =>
 
 builder.Services.AddSingleton<TenantConnectionStringBuilder>();
 builder.Services.AddScoped<ITenantResolver, TenantResolver>();
+builder.Services.AddSingleton<ITenantDbContextFactory, TenantDbContextFactory>();
+builder.Services.AddScoped<TenantDbContext>(sp =>
+    sp.GetRequiredService<ITenantDbContextFactory>()
+      .Create(sp.GetRequiredService<ITenantContext>()));
+builder.Services.AddScoped<ITenantProvisioningService, TenantProvisioningService>();
 
 // ITenantContext wird aus HttpContext.Items gelesen — nur in tenant-scoped Requests gültig.
 // Endpoints ohne Tenant dürfen ITenantContext nicht direkt injizieren;
@@ -43,10 +49,14 @@ if (app.Environment.IsDevelopment()
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<MasterDbContext>();
     await db.Database.MigrateAsync();
+    var provisioner = scope.ServiceProvider.GetRequiredService<ITenantProvisioningService>();
+    var tenantFactory = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+    var tenantConnBuilder = scope.ServiceProvider.GetRequiredService<TenantConnectionStringBuilder>();
     var logger = scope.ServiceProvider
         .GetRequiredService<ILoggerFactory>()
         .CreateLogger(nameof(MasterDataSeeder));
-    await MasterDataSeeder.SeedDevelopmentDataAsync(db, logger);
+    await MasterDataSeeder.SeedDevelopmentDataAsync(
+        db, provisioner, tenantFactory, tenantConnBuilder, logger);
 }
 
 app.UseMiddleware<TenantResolverMiddleware>();

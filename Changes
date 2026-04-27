@@ -2,6 +2,69 @@
 
 ---
 
+## 2026-04-27 — Schritt 5: TenantDbContext + Tenant-Provisioning
+
+**Mini-Cleanup: MSB3277-Warning behoben**
+- `tests/PraxisFloeckinger.Tests/PraxisFloeckinger.Tests.csproj` — explizite `Microsoft.EntityFrameworkCore.Relational 9.*`-Referenz ergänzt (löst Diamond-Konflikt zwischen Mvc.Testing 9.0.1 und EF Core 9.0.15)
+
+**src/PraxisFloeckinger.Core/Identity** — neue Entities:
+- `User.cs` — sealed, SoftDeletableEntityBase + IAuditable + ITenantScoped; Email (max 320), PasswordHash (Argon2id, max 500), Role, FirstName/LastName (max 100), Phone (max 50), TotpEnabled/TotpSecret (max 200)
+- `PatientProfile.cs` — 1:1 zu User; BirthDate, Address (max 500), EmergencyContact/InsuranceInfo/PublicNotes
+- `TherapistProfile.cs` — 1:1 zu User; Specializations (text[], max 20 Einträge), Bio (max 5000), IsSupervisor
+
+**src/PraxisFloeckinger.Core/Tenancy** — neues Interface:
+- `ITenantProvisioningService.cs` — `Task ProvisionAsync(string subdomain, string displayName, LicenseTier tier, CancellationToken ct)`
+
+**src/PraxisFloeckinger.Infrastructure/Tenancy** — neue Dateien:
+- `ITenantDbContextFactory.cs` — in Infrastructure (nicht Core) wegen TenantDbContext-Rückgabetyp; `TenantDbContext Create(ITenantContext)`
+- `TenantProvisioningService.cs` — sealed; CREATE DATABASE via server-level NpgsqlConnection (außerhalb Transaktion), Tenant-Row in Master-DB, MigrateAsync auf neue DB; nicht idempotent (TODO: Recovery-Logik)
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant** — neues Verzeichnis:
+- `TenantDbContext.cs` — DbSets Users/PatientProfiles/TherapistProfiles; SaveChangesAsync-Override setzt ModifiedAt (Modified) + DeletedAt (IsDeleted-Übergang false→true); Global Query Filters für Soft-Delete; 1:1-Relationships mit Cascade; text[] + Check-Constraint für Specializations
+- `TenantDbContextFactory.cs` — Singleton; baut DbContextOptionsBuilder<TenantDbContext> aus ConnectionString; `ITenantDbContextFactory`-Implementierung
+- `TenantDbContextDesignTimeFactory.cs` — liest ENV `ConnectionStrings__TenantDesignTime`; Fallback auf Dev-String; Stub-TenantContext mit Guid.Empty für dotnet-ef
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant/Migrations:**
+- `20260427171826_InitialTenant.cs` — erstellt Users, PatientProfiles, TherapistProfiles mit allen Constraints
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDbContext.cs** — using-Aliases ergänzt:
+- `using TenantEntity = PraxisFloeckinger.Core.Tenancy.Tenant;`
+- `using LicenseEventEntity = PraxisFloeckinger.Core.Tenancy.LicenseEvent;`
+- Löst CS0118-Kollision mit neuem Namespace `Persistence.Tenant`
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDataSeeder.cs** — komplett überarbeitet:
+- Neue Signatur: `SeedDevelopmentDataAsync(db, provisioningService, tenantDbContextFactory, tenantConnectionStringBuilder, logger)`
+- Entfernt alten Dummy-Tenant (DbConnectionRef startsWith "tenant_dev_"), provisioniert echte Tenant-DB
+- Legt Demo-Therapeut + Demo-Patient + TherapistProfile + PatientProfile in Tenant-DB an (idempotent via `Users.AnyAsync()`)
+
+**src/PraxisFloeckinger.Api/Program.cs** — erweitert:
+- `AddSingleton<ITenantDbContextFactory, TenantDbContextFactory>`
+- `AddScoped<TenantDbContext>` via Factory
+- `AddScoped<ITenantProvisioningService, TenantProvisioningService>`
+- Startup-Block ruft MasterDataSeeder mit neuer Signatur
+
+**tests/PraxisFloeckinger.Tests/Infrastructure/TenantDbContextTests.cs** — 8 neue Tests:
+- Migration_AllTablesExist
+- SoftDelete_User_HiddenFromNormalQuery_VisibleWithIgnoreQueryFilters
+- SaveChangesAsync_SoftDelete_SetsDeletedAt
+- SaveChangesAsync_Update_SetsModifiedAt
+- SaveChangesAsync_SecondSoftDelete_DoesNotOverwriteDeletedAt
+- PatientProfile_CascadeDelete_WhenUserHardDeleted
+- TherapistProfile_Specializations_PersistedAsTextArray
+
+**tests/PraxisFloeckinger.Tests/Infrastructure/TenantProvisioningServiceTests.cs** — 4 neue Tests:
+- ProvisionAsync_CreatesDbAndTenantRow
+- ProvisionAsync_TenantTablesExistAfterProvisioning
+- ProvisionAsync_DuplicateSubdomain_ThrowsInvalidOperationException
+- ProvisionAsync_TenantId_IsPersistedCorrectly
+
+**dotnet build** — 0 Fehler, 0 Warnungen
+**dotnet test** — 44/44 grün
+
+**Commit:** `feat(infra): add tenant DbContext with users/patients/therapists, provisioning service, first tenant migration; dev seeder provisions real tenant DB`
+
+---
+
 ## 2026-04-27 — Schritt 4: Tenant-Resolver-Middleware
 
 **src/PraxisFloeckinger.Core/Tenancy** — neue Dateien:

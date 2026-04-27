@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using PraxisFloeckinger.Core.Identity;
-using PraxisFloeckinger.Core.Tenancy;
+// "Tenant" als unqualifizierter Name kollidiert mit dem Namespace
+// PraxisFloeckinger.Infrastructure.Persistence.Tenant — Aliases lösen die Ambiguität.
+using LicenseEventEntity = PraxisFloeckinger.Core.Tenancy.LicenseEvent;
+using TenantEntity = PraxisFloeckinger.Core.Tenancy.Tenant;
 
 namespace PraxisFloeckinger.Infrastructure.Persistence.Master;
 
@@ -15,10 +18,10 @@ public sealed class MasterDbContext : DbContext
     public MasterDbContext(DbContextOptions<MasterDbContext> options) : base(options) { }
 
     /// <summary>Alle registrierten Praxen (Tenants).</summary>
-    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<TenantEntity> Tenants => Set<TenantEntity>();
 
     /// <summary>Unveränderlicher Lizenz-Audit-Trail pro Tenant.</summary>
-    public DbSet<LicenseEvent> LicenseEvents => Set<LicenseEvent>();
+    public DbSet<LicenseEventEntity> LicenseEvents => Set<LicenseEventEntity>();
 
     /// <summary>Plattform-Administratoren (verwalten Tenants, kein Zugriff auf Patientendaten).</summary>
     public DbSet<SystemAdmin> SystemAdmins => Set<SystemAdmin>();
@@ -34,7 +37,7 @@ public sealed class MasterDbContext : DbContext
 
     private static void ConfigureTenant(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<Tenant>(entity =>
+        modelBuilder.Entity<TenantEntity>(entity =>
         {
             entity.HasKey(e => e.Id);
 
@@ -70,7 +73,7 @@ public sealed class MasterDbContext : DbContext
 
     private static void ConfigureLicenseEvent(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<LicenseEvent>(entity =>
+        modelBuilder.Entity<LicenseEventEntity>(entity =>
         {
             entity.HasKey(e => e.Id);
 
@@ -84,7 +87,7 @@ public sealed class MasterDbContext : DbContext
             entity.Property(e => e.Note)
                   .HasMaxLength(1000);
 
-            entity.HasOne<Tenant>()
+            entity.HasOne<TenantEntity>()
                   .WithMany()
                   .HasForeignKey(e => e.TenantId)
                   .OnDelete(DeleteBehavior.Cascade);
