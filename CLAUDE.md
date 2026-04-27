@@ -14,11 +14,13 @@ und alle Konventionen für dieses Projekt.
 
 ## Aktueller Projekt-Stand
 
-- Solution-Skeleton steht (Schritt 1 abgeschlossen): 7 Projekte in
-  src/ und tests/, Directory.Build.props auf Solution-Root,
-  .editorconfig, ADR-Template, erster ADR (0001-database-per-tenant),
-  GitHub-Repo (privat) initialisiert.
-- Aktueller Stand: Schritt 2 (Core-Domäne) steht an.
+- Schritt 1 (Solution-Skeleton): 7 Projekte, Directory.Build.props,
+  .editorconfig, ADR-Template, ADR-0001, GitHub-Repo — abgeschlossen.
+- Schritt 2 (Core-Domäne): EntityBase, SoftDeletableEntityBase, alle
+  Enums, ITenantContext, TenantInfo — abgeschlossen.
+- Schritt 3 (Infrastructure / Master-DB): MasterDbContext, Entities,
+  erste Migration, Testcontainers-Integration-Tests — abgeschlossen.
+- Aktueller Stand: Schritt 4 (Tenant-Resolver-Middleware) läuft.
 - Eine alte ASP.NET MVC-App liegt unter ../Old/ als Referenz (Marketing-Seiten,
   Karriere-Timeline, Coaching mit PriceConfig, Razor-Layout, CSS). Wird erst
   nach der Multi-Tenant-Foundation in PraxisFloeckinger.Web überführt.
@@ -55,7 +57,7 @@ Infrastructure → Core, Shared
 Api         → Infrastructure, Shared
 Web         → Shared          (holt Daten per HTTP von Api, kein direkter DB-Zugriff)
 Praxis      → Core, Shared    ← STRIKTE REGEL: niemals Api oder Infrastructure!
-Tests       → Core, Infrastructure, Shared
+Tests       → Core, Infrastructure, Shared, Api (nur für WebApplicationFactory-Tests)
 ```
 
 **Warum Praxis nur Core + Shared:** Die lokale Praxis-Software auf dem Mac mini

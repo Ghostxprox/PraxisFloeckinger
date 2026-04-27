@@ -2,6 +2,83 @@
 
 ---
 
+## 2026-04-27 — Schritt 4: Tenant-Resolver-Middleware
+
+**src/PraxisFloeckinger.Core/Tenancy** — neue Dateien:
+- `TenantContext.cs` — sealed class, implementiert ITenantContext; Request-scoped DI-Instanz
+- `ITenantResolver.cs` — Interface: `Task<TenantInfo?> ResolveAsync(string, CancellationToken)`
+
+**src/PraxisFloeckinger.Infrastructure/Tenancy** — neues Verzeichnis:
+- `TenantConnectionStringBuilder.cs` — liest ConnectionStrings:TenantTemplate aus IConfiguration,
+  ersetzt `{DB}` durch `Tenant.DbConnectionRef`; Singleton; Connection-String nie loggen
+- `TenantResolver.cs` — sealed, implementiert ITenantResolver; Dependencies: MasterDbContext,
+  IMemoryCache, TenantConnectionStringBuilder, ILogger; 60-Sekunden-Cache (inkl. null-Caching
+  für unbekannte/inaktive Subdomains); DB-Abfrage nur bei Cache-Miss
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDataSeeder.cs** — neu:
+- Idempotenter Dev-Seed; legt Tenant `floeckinger`/`tenant_dev_floeckinger` an wenn noch keiner existiert
+- Nur aufgerufen wenn `IsDevelopment() && RunMigrationsOnStartup=true`
+
+**src/PraxisFloeckinger.Api/Tenancy** — neues Verzeichnis:
+- `RequireTenantAttribute.cs` — Marker-Attribut `[RequireTenant]`
+- `RequireTenantFilter.cs` — IEndpointFilter; 400 Problem Details wenn kein TenantContext in Items
+- `TenantResolverMiddleware.cs` — liest Subdomain:
+  1. Dev: Header `X-Tenant-Subdomain` (nur wenn `IsDevelopment()`)
+  2. Host-Parsing gegen `Tenancy:RootDomains`-Array (loopback wird nie aufgelöst)
+  - Kein Tenant → next() ohne TenantContext
+  - Tenant gefunden → `HttpContext.Items["TenantContext"] = new TenantContext(...)`
+  - Subdomain vorhanden aber unbekannt → 404 Problem Details
+
+**src/PraxisFloeckinger.Api/Program.cs** — vollständig neu:
+- AddMemoryCache, AddHttpContextAccessor
+- AddDbContext<MasterDbContext> mit ConnectionStrings:Master
+- AddSingleton<TenantConnectionStringBuilder>, AddScoped<ITenantResolver, TenantResolver>
+- AddScoped<ITenantContext> — liest aus HttpContext.Items (wirft bei Zugriff außerhalb Tenant-Request)
+- Startup: MigrateAsync + MasterDataSeeder wenn Development && RunMigrationsOnStartup=true
+- UseMiddleware<TenantResolverMiddleware>
+- Endpoints: GET /healthz (kein Tenant), GET /api/v1/whoami (RequireTenantFilter)
+- `public partial class Program;` für WebApplicationFactory
+
+**src/PraxisFloeckinger.Api/appsettings.json** — ConnectionStrings:TenantTemplate + Tenancy:RootDomains ergänzt
+**src/PraxisFloeckinger.Api/appsettings.Development.json** — TenantTemplate + RootDomains mit echten Dev-Werten
+
+**CLAUDE.md** — Aktueller Projekt-Stand auf Schritt 4 aktualisiert;
+  Tests → Api-Referenz (WebApplicationFactory) in Projekt-Referenz-Regeln ergänzt
+
+**src/PraxisFloeckinger.Infrastructure/PraxisFloeckinger.Infrastructure.csproj**:
+- Microsoft.Extensions.Caching.Abstractions 9.* hinzugefügt
+
+**tests/PraxisFloeckinger.Tests/PraxisFloeckinger.Tests.csproj**:
+- Microsoft.AspNetCore.Mvc.Testing 9.* hinzugefügt
+- ProjectReference auf PraxisFloeckinger.Api hinzugefügt
+
+**tests/PraxisFloeckinger.Tests/Infrastructure/TenantResolverTests.cs** — 4 neue Tests:
+- ResolveAsync_KnownActiveSubdomain_ReturnsTenantInfo
+- ResolveAsync_UnknownSubdomain_ReturnsNullAndCachesResult
+- ResolveAsync_InactiveTenant_ReturnsNull
+- ResolveAsync_CalledTwiceWithinTtl_HitsCacheNotDb (löscht Tenant nach Cache-Befüllung)
+
+**tests/PraxisFloeckinger.Tests/Api/TenantResolverMiddlewareTests.cs** — 6 neue Tests via WebApplicationFactory:
+- Request_OhneSubdomain_PassesThrough_NoTenantRequired
+- Request_MitDevHeader_ResolvesTenant_Returns200
+- Request_MitDevHeader_ImNichtDevelopmentMode_IgnoriertHeader_Returns400
+- Request_MitUnbekannterSubdomain_Returns404WithProblemDetails
+- Request_MitInaktivemTenant_Returns404
+- Request_AnRequireTenantEndpoint_OhneTenant_Returns400WithProblemDetails
+- Fix: `RunMigrationsOnStartup=false` in TestFactory damit keine echte DB nötig
+
+**dotnet build** — 0 Fehler (1 MSB3277 MSBuild-Warnung, benign, unverändert)
+**dotnet test** — 33/33 grün (23 aus Schritt 3 + 10 neue)
+**dotnet run + curl** — alle 4 Szenarien verifiziert:
+  GET /healthz → 200 `{"status":"healthy"}`
+  GET /api/v1/whoami + X-Tenant-Subdomain: floeckinger → 200 `{tenantId, subdomain}`
+  GET /api/v1/whoami + X-Tenant-Subdomain: existiert-nicht → 404 Problem Details
+  GET /api/v1/whoami (kein Header) → 400 Problem Details
+
+**Commit:** `feat(api): add tenant resolver middleware with caching, require-tenant filter, dev header override, dummy tenant seed`
+
+---
+
 ## 2026-04-26 — dotnet-ef Tool-Pinning + Schritt 3: Infrastructure / Master-DB
 
 **Commit:** `6c2cb75 chore: pin dotnet-ef as local tool (EF Core 9)`

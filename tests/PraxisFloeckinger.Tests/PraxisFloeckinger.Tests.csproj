@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="AwesomeAssertions" Version="9.4.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.*" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.*" />
@@ -18,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\PraxisFloeckinger.Api\PraxisFloeckinger.Api.csproj" />
     <ProjectReference Include="..\..\src\PraxisFloeckinger.Core\PraxisFloeckinger.Core.csproj" />
     <ProjectReference Include="..\..\src\PraxisFloeckinger.Infrastructure\PraxisFloeckinger.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\PraxisFloeckinger.Shared\PraxisFloeckinger.Shared.csproj" />
