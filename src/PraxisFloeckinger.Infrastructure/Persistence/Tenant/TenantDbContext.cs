@@ -23,6 +23,7 @@ public sealed class TenantDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<PatientProfile> PatientProfiles => Set<PatientProfile>();
     public DbSet<TherapistProfile> TherapistProfiles => Set<TherapistProfile>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,6 +31,7 @@ public sealed class TenantDbContext : DbContext
         ConfigureUser(modelBuilder);
         ConfigurePatientProfile(modelBuilder);
         ConfigureTherapistProfile(modelBuilder);
+        ConfigureRefreshToken(modelBuilder);
     }
 
     /// <summary>
@@ -159,6 +161,45 @@ public sealed class TenantDbContext : DbContext
             entity.HasOne<User>()
                   .WithOne()
                   .HasForeignKey<TherapistProfile>(p => p.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private static void ConfigureRefreshToken(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<RefreshToken>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.TokenHash)
+                  .HasMaxLength(64)
+                  .IsRequired();
+            entity.HasIndex(e => e.TokenHash)
+                  .IsUnique()
+                  .HasDatabaseName("IX_RefreshTokens_TokenHash");
+
+            entity.HasIndex(e => e.UserId)
+                  .HasDatabaseName("IX_RefreshTokens_UserId");
+
+            entity.Property(e => e.RevokedReason)
+                  .HasMaxLength(100);
+
+            entity.Property(e => e.CreatedFromIp)
+                  .HasMaxLength(64)
+                  .IsRequired();
+
+            entity.Property(e => e.CreatedFromUserAgent)
+                  .HasMaxLength(512)
+                  .IsRequired();
+
+            entity.Property(e => e.IsDeleted)
+                  .HasDefaultValue(false);
+
+            entity.HasQueryFilter(e => !e.IsDeleted);
+
+            entity.HasOne<User>()
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
     }

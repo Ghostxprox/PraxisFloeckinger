@@ -14,13 +14,22 @@ namespace PraxisFloeckinger.Infrastructure.Persistence.Master;
 /// </summary>
 public static class MasterDataSeeder
 {
+    /// <summary>
+    /// Demo-Passwort für BEIDE Dev-Accounts.
+    /// DEV ONLY — niemals in Production verwenden!
+    /// </summary>
+    public const string DevPassword = "DevPassword123!";
+
     public static async Task SeedDevelopmentDataAsync(
         MasterDbContext db,
         ITenantProvisioningService provisioningService,
         ITenantDbContextFactory tenantDbContextFactory,
         TenantConnectionStringBuilder tenantConnectionStringBuilder,
+        IPasswordHasher passwordHasher,
         ILogger logger)
     {
+        logger.LogWarning("DEV ONLY — demo users with predictable passwords.");
+
         // Alten Dummy-Tenant aus Schritt 3 (DbConnectionRef "tenant_dev_*") ersetzen —
         // der hatte keine echte DB dahinter.
         var existing = await db.Tenants
@@ -50,10 +59,12 @@ public static class MasterDataSeeder
         if (await tenantDb.Users.AnyAsync())
             return;
 
+        var pwHash = passwordHasher.Hash(DevPassword);
+
         var therapeut = new User
         {
             Email = "tobias@floeckinger.dev",
-            PasswordHash = "argon2id-placeholder",
+            PasswordHash = pwHash,
             Role = UserRole.Therapeut,
             FirstName = "Tobias",
             LastName = "Flöckinger",
@@ -61,7 +72,7 @@ public static class MasterDataSeeder
         var patient = new User
         {
             Email = "patient@floeckinger.dev",
-            PasswordHash = "argon2id-placeholder",
+            PasswordHash = pwHash,
             Role = UserRole.Patient,
             FirstName = "Max",
             LastName = "Mustermann",

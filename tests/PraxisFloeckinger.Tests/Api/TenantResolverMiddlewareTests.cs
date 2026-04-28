@@ -1,9 +1,15 @@
 using System.Net;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text.Encodings.Web;
 using AwesomeAssertions;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using PraxisFloeckinger.Core.Tenancy;
 
 namespace PraxisFloeckinger.Tests.Api;
@@ -13,6 +19,8 @@ namespace PraxisFloeckinger.Tests.Api;
 /// via <see cref="WebApplicationFactory{TEntryPoint}"/>.
 /// Der echte <see cref="ITenantResolver"/> wird durch einfache Test-Doubles ersetzt,
 /// sodass kein Datenbankcontainer benötigt wird.
+/// Die JWT-Authentifizierung wird durch einen Fake-Handler ersetzt, der Tenant-Claims
+/// direkt aus <c>HttpContext.Items["TenantContext"]</c> liest.
 /// </summary>
 public sealed class TenantResolverMiddlewareTests
 {
@@ -115,6 +123,20 @@ public sealed class TenantResolverMiddlewareTests
         private readonly ITenantResolver _resolver;
         private readonly string _environment;
 
+        // Einmaliges RSA-Schlüsselpaar für alle Middleware-Tests (JwtSigningKeyProvider).
+        private static readonly string SharedKeyPath = CreateSharedJwtKeyFile();
+
+        private static string CreateSharedJwtKeyFile()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "praxis-tenant-mw-test-jwt.key");
+            if (!File.Exists(path))
+            {
+                using var rsa = RSA.Create(2048);
+                File.WriteAllText(path, rsa.ExportRSAPrivateKeyPem());
+            }
+            return path;
+        }
+
         public TestFactory(ITenantResolver resolver, string environment)
         {
             _resolver = resolver;
@@ -135,6 +157,14 @@ public sealed class TenantResolverMiddlewareTests
                     ["Tenancy:RootDomains:0"] = "praxis-floeckinger.at",
                     // Migrations in Testumgebung nie ausführen (kein echter DB-Container)
                     ["RunMigrationsOnStartup"] = "false",
+                    // JWT-Key für JwtSigningKeyProvider (Singleton muss initialisiert werden können)
+                    ["Jwt:PrivateKeyPath"] = SharedKeyPath,
+                    ["Jwt:Issuer"] = "test",
+                    ["Jwt:Audience"] = "test",
+                    ["Jwt:AccessTokenMinutes"] = "15",
+                    // Rate-Limiting in Tests hochschrauben
+                    ["RateLimit:LoginPermitLimit"] = "10000",
+                    ["RateLimit:RefreshPermitLimit"] = "10000",
                 }));
 
             builder.ConfigureServices(services =>
@@ -146,7 +176,49 @@ public sealed class TenantResolverMiddlewareTests
                     services.Remove(descriptor);
 
                 services.AddSingleton(_resolver);
+
+                // JWT-Auth durch Fake-Handler ersetzen, der Tenant-Claims aus HttpContext.Items liest.
+                // Dadurch testen wir die TenantResolverMiddleware ohne echtes JWT.
+                services.AddAuthentication(TestAuthHandler.SchemeName)
+                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
+                        TestAuthHandler.SchemeName, _ => { });
             });
+        }
+    }
+
+    // ─── Fake-Auth-Handler ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Authentifiziert jeden Request als Test-User. Liest Tenant-Daten aus
+    /// <c>HttpContext.Items["TenantContext"]</c> und fügt sie als Claims ein,
+    /// damit <c>/api/v1/whoami</c> tenant_id / tenant_sub zurückgeben kann.
+    /// </summary>
+    private sealed class TestAuthHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder)
+        : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        public const string SchemeName = "Test";
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            var claims = new List<Claim>
+            {
+                new("sub", Guid.NewGuid().ToString()),
+                new("email", "test@test.dev"),
+                new("role", "Therapeut"),
+            };
+
+            if (Context.Items["TenantContext"] is ITenantContext tenantCtx)
+            {
+                claims.Add(new("tenant_id", tenantCtx.TenantId.ToString()));
+                claims.Add(new("tenant_sub", tenantCtx.Subdomain));
+            }
+
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, SchemeName));
+            var ticket = new AuthenticationTicket(principal, SchemeName);
+            return Task.FromResult(AuthenticateResult.Success(ticket));
         }
     }
 

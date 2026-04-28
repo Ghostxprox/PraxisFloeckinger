@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Nested subfolder (empty workspace artifact)
 PraxisFloeckinger/
+
+# JWT-Schlüssel (lokal generiert, nie committen)
+keys/

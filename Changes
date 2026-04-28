@@ -2,6 +2,58 @@
 
 ---
 
+## 2026-04-28 — Schritt 6a: Authentication Foundation
+
+**src/PraxisFloeckinger.Core/Identity** — neue Interfaces + Entities:
+- `IPasswordHasher.cs` — `Hash`, `Verify`, `NeedsRehash`
+- `IJwtTokenService.cs` — `AccessTokenLifetime`, `IssueAccessToken(User, ITenantContext)`
+- `IRefreshTokenService.cs` — `IssueAsync`, `ValidateAsync`, `RevokeAsync`, `RevokeAllForUserAsync`
+- `RefreshToken.cs` — sealed, SoftDeletableEntityBase + ITenantScoped; TokenHash (SHA-256-Hex, 64), ExpiresAt, RevokedAt?, RevokedReason?, CreatedFromIp, CreatedFromUserAgent
+
+**src/PraxisFloeckinger.Infrastructure/Identity** — neue Implementierungen:
+- `Argon2idPasswordHasher.cs` — PHC-Format `$argon2id$v=19$m=65536,t=3,p=4$…`; m=64 MB, t=3, p=4; CryptographicOperations.FixedTimeEquals; NeedsRehash prüft Parameter
+- `JwtSigningKeyProvider.cs` — Singleton; RSA-2048 PEM-Datei; auto-generiert in Development; exportiert SigningKey (privat) + ValidationKey (nur Public Key)
+- `JwtTokenService.cs` — RS256; Claims: sub, email, role, tenant_id, tenant_sub, jti; konfigurierbares Lifetime (Jwt:AccessTokenMinutes)
+- `RefreshTokenService.cs` — SHA-256-Hash des Raw-Tokens gespeichert; Lifetimes: Patient=24h, Staff=8h, RememberMe=30d; Token-Rotation via RevokeAsync("rotation")
+
+**src/PraxisFloeckinger.Api/Authentication** — neues Verzeichnis:
+- `JwtBearerConfiguration.cs` — `AddPraxisJwtBearer()`; MapInboundClaims=false; IOptions-Late-Binding via `Configure<JwtSigningKeyProvider, IConfiguration>`
+- `AuthEndpoints.cs` — `/api/v1/auth/login`, `/refresh`, `/logout`; tenant-scoped Services via `ctx.RequestServices`; RequireRateLimiting("login"/"refresh")
+- `TokenTenantValidatorMiddleware.cs` — 403 wenn JWT `tenant_id` ≠ aufgelöster Tenant
+- DTOs: `LoginRequest`, `LoginResponse`, `RefreshRequest`, `LogoutRequest`
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant:**
+- `TenantDbContext.cs` — `DbSet<RefreshToken>` ergänzt; Unique-Index auf TokenHash, Index auf UserId, Soft-Delete-Filter
+- `Migrations/20260428203815_AddRefreshTokens.cs` — erstellt RefreshTokens-Tabelle
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDataSeeder.cs** — überarbeitet:
+- Nimmt `IPasswordHasher` entgegen; legt Demo-Passwort via `passwordHasher.Hash("DevPassword123!")` an; `DEV ONLY`-LogWarning
+
+**src/PraxisFloeckinger.Api/Program.cs** — erweitert:
+- `AddRateLimiter` (Login: 5/min/IP, Refresh: 10/min/IP; via `RateLimit:*PermitLimit` konfigurierbar)
+- `AddAuthentication().AddPraxisJwtBearer()`, `AddAuthorization()`
+- `AddSingleton<IPasswordHasher>`, `AddSingleton<JwtSigningKeyProvider>`, `AddSingleton<IJwtTokenService>`, `AddScoped<IRefreshTokenService>`
+- Middleware-Reihenfolge: `UseRateLimiter → TenantResolverMiddleware → UseAuthentication → TokenTenantValidatorMiddleware → UseAuthorization`
+- `app.MapAuthEndpoints()`; `/api/v1/whoami` liest aus ClaimsPrincipal statt ITenantContext
+
+**src/PraxisFloeckinger.Api/appsettings.json / appsettings.Development.json** — `Jwt:`-Sektion ergänzt
+
+**tests/PraxisFloeckinger.Tests/Infrastructure:**
+- `Argon2idPasswordHasherTests.cs` — 7 Tests (PHC-Format, Salting, Verify, NeedsRehash)
+- `JwtTokenServiceTests.cs` — 4 Tests (Claims, Signatur, Lifetime, falscher Issuer)
+- `RefreshTokenServiceTests.cs` — 8 Tests (Hash-Sicherheit, Validate, Revoke, Lifetimes, RevokeAll)
+
+**tests/PraxisFloeckinger.Tests/Api:**
+- `AuthEndpointsTests.cs` — 12 Tests via IClassFixture<AuthTestFixture>; Login/Refresh/Logout/Whoami/Cross-Tenant
+- `TenantResolverMiddlewareTests.cs` — Fake-Auth-Handler (TestAuthHandler) ersetzt JWT; gemeinsamer RSA-Key in Temp-Dir
+
+**dotnet build** — 0 Fehler, 0 Warnungen
+**dotnet test** — 75/75 grün
+
+**Commit:** `feat(auth): add argon2id hasher, jwt rs256 issuer, refresh token rotation, login/refresh/logout endpoints with rate limiting and cross-tenant token validation`
+
+---
+
 ## 2026-04-27 — Schritt 5: TenantDbContext + Tenant-Provisioning
 
 **Mini-Cleanup: MSB3277-Warning behoben**
