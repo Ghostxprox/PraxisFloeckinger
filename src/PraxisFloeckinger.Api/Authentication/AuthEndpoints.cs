@@ -44,12 +44,24 @@ public static class AuthEndpoints
             var tenantCtx = (ITenantContext)ctx.Items["TenantContext"]!;
             var tenantDb = ctx.RequestServices.GetRequiredService<TenantDbContext>();
             var refreshService = ctx.RequestServices.GetRequiredService<IRefreshTokenService>();
+            var lockoutService = ctx.RequestServices.GetRequiredService<IAccountLockoutService>();
 
             var user = await tenantDb.Users
                 .FirstOrDefaultAsync(u => u.Email == req.Email.ToLowerInvariant().Trim(), ct);
 
-            if (user is null || !hasher.Verify(req.Password, user.PasswordHash))
+            if (user is null)
                 return Results.Problem(title: "Invalid credentials", statusCode: 401);
+
+            if (lockoutService.IsLockedOut(user))
+                return Results.Problem(title: "Account temporarily locked", statusCode: 429);
+
+            if (!hasher.Verify(req.Password, user.PasswordHash))
+            {
+                await lockoutService.RegisterFailureAsync(user, ct);
+                return Results.Problem(title: "Invalid credentials", statusCode: 401);
+            }
+
+            await lockoutService.ResetAsync(user, ct);
 
             if (hasher.NeedsRehash(user.PasswordHash))
             {

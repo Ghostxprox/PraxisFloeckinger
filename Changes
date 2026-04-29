@@ -2,6 +2,47 @@
 
 ---
 
+## 2026-04-29 — Schritt 6c: Rollen-basierte Authorization-Policies + Account-Lockout
+
+**src/PraxisFloeckinger.Core/Identity** — erweitert:
+- `User.cs` — `FailedLoginAttempts int` (default 0), `LockedUntil DateTimeOffset?` (null = entsperrt)
+- `IAccountLockoutService.cs` — `IsLockedOut(User)`, `RegisterFailureAsync(User)`, `ResetAsync(User)`
+
+**src/PraxisFloeckinger.Infrastructure/Identity** — neu:
+- `AccountLockoutService.cs` — Scoped; `MaxAttempts` (default 5) + `LockoutMinutes` (default 15) aus `Auth:Lockout:*`; `RegisterFailureAsync`: Zähler++; bei `>= MaxAttempts` → `LockedUntil = UtcNow + minutes`; `ResetAsync` setzt beides zurück
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant:**
+- `TenantDbContext.cs` — `FailedLoginAttempts` mit `HasDefaultValue(0)` konfiguriert
+- `Migrations/20260429193406_AddAccountLockoutFields.cs` — `FailedLoginAttempts int default 0`, `LockedUntil timestamp?` auf Users
+
+**src/PraxisFloeckinger.Api/Authentication** — neu + erweitert:
+- `RolePolicies.cs` — 8 Policies (alle erfordern `purpose=access`):
+  - `OnlyPatient`, `OnlyTherapist`, `OnlySupervisor`, `OnlySekretariat`, `OnlyPraxisAdmin`
+  - `StaffOnly` (Sekretärin|Therapeut|Supervisor|PraxisAdmin)
+  - `TherapyClinicalAccess` (Therapeut|Supervisor)
+  - `AdminOrSupervisor` (PraxisAdmin|Supervisor)
+- `DemoEndpoints.cs` — `#if DEBUG`; 4 Demo-Routes unter `/api/v1/demo/` mit je einer Rollen-Policy
+- `AuthEndpoints.cs` — Login-Handler: Lockout-Check vor Passwort-Prüfung (429); RegisterFailure bei Fehler; ResetAsync bei Erfolg
+
+**src/PraxisFloeckinger.Api/Program.cs** — erweitert:
+- `AddScoped<IAccountLockoutService, AccountLockoutService>()`
+- `options.AddRolePolicies()` in `AddAuthorization`
+- `#if DEBUG` Block für `app.MapDemoEndpoints()`
+
+**src/PraxisFloeckinger.Api/appsettings.json** — `Auth:Lockout:MaxAttempts=5`, `Auth:Lockout:LockoutMinutes=15`
+
+**tests/PraxisFloeckinger.Tests/Infrastructure — neue Tests:**
+- `AccountLockoutServiceTests.cs` — 4 Tests (IsLockedOut=false, BelowMax→kein Lock, AtMax→gesperrt, Reset→entsperrt)
+
+**tests/PraxisFloeckinger.Tests/Api — neue Tests:**
+- `RolePolicyTests.cs` — 9 Tests; `RolePolicyFactory` mit Fake-Resolver + `RolePolicyTestAuthHandler` (liest `X-Test-Role`/`X-Test-Purpose` Header); testet alle 8 Policies + MFA-Token-Ablehnung
+- `LoginLockoutTests.cs` — 4 End-to-End-Tests: BelowMax→401, AtMax+1→429, Erfolg→Reset, Lock+korrektes PW→429
+
+**dotnet build** — 0 Fehler, 0 Warnungen
+**dotnet test** — 120/120 grün (103 Schritt 6a/6b + 17 neu)
+
+---
+
 ## 2026-04-29 — Schritt 6b: TOTP-2FA mit Field-Encryption, zweistufigem Login, Recovery-Codes
 
 **NuGet (PraxisFloeckinger.Infrastructure):** `Otp.NET 1.4.1`, `QRCoder 1.8.0`

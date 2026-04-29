@@ -35,4 +35,10 @@ public sealed class User : SoftDeletableEntityBase, IAuditable, ITenantScoped
 
     /// <summary>True wenn der User beim nächsten Login neue Recovery-Codes generieren muss.</summary>
     public bool MustRotateRecoveryCodes { get; set; } = false;
+
+    /// <summary>Anzahl aufeinanderfolgender fehlgeschlagener Login-Versuche.</summary>
+    public int FailedLoginAttempts { get; set; } = 0;
+
+    /// <summary>Gesperrt bis zu diesem Zeitpunkt; null = nicht gesperrt.</summary>
+    public DateTimeOffset? LockedUntil { get; set; }
 }

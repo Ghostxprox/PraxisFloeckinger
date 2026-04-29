@@ -55,11 +55,16 @@ builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 builder.Services.AddSingleton<IFieldEncryptor, AesGcmFieldEncryptor>();
 builder.Services.AddSingleton<ITotpService, TotpService>();
 builder.Services.AddScoped<ITwoFactorRecoveryService, TwoFactorRecoveryService>();
+builder.Services.AddScoped<IAccountLockoutService, AccountLockoutService>();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddPraxisJwtBearer();
-builder.Services.AddAuthorization(options => options.AddMfaPolicies());
+builder.Services.AddAuthorization(options =>
+{
+    options.AddMfaPolicies();
+    options.AddRolePolicies();
+});
 
 // Rate Limiting (Login: 5/min, Refresh: 10/min, beide per IP)
 // RateLimit:LoginPermitLimit / RateLimit:RefreshPermitLimit können in Tests überschrieben werden.
@@ -145,6 +150,10 @@ app.MapGet("/api/v1/whoami", (HttpContext ctx) =>
 .RequireAuthorization(MfaPolicies.RequireFullAuth);
 
 app.MapAuthEndpoints();
+
+#if DEBUG
+app.MapDemoEndpoints();
+#endif
 
 app.Run();
 

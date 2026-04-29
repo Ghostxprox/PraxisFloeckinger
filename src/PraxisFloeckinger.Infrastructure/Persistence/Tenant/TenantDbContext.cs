@@ -103,6 +103,9 @@ public sealed class TenantDbContext : DbContext
             entity.Property(e => e.MustRotateRecoveryCodes)
                   .HasDefaultValue(false);
 
+            entity.Property(e => e.FailedLoginAttempts)
+                  .HasDefaultValue(0);
+
             entity.Property(e => e.IsDeleted)
                   .HasDefaultValue(false);
 
