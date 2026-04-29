@@ -30,6 +30,9 @@ public sealed class User : SoftDeletableEntityBase, IAuditable, ITenantScoped
     /// <summary>True wenn TOTP-2FA aktiviert ist.</summary>
     public bool TotpEnabled { get; set; } = false;
 
-    /// <summary>TOTP-Seed (Base32, max 200 Zeichen); null wenn 2FA deaktiviert.</summary>
+    /// <summary>TOTP-Secret (AES-256-GCM verschlüsselt, Base64, max 500 Zeichen); null wenn 2FA deaktiviert.</summary>
     public string? TotpSecret { get; set; }
+
+    /// <summary>True wenn der User beim nächsten Login neue Recovery-Codes generieren muss.</summary>
+    public bool MustRotateRecoveryCodes { get; set; } = false;
 }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using PraxisFloeckinger.Core.Cryptography;
 using PraxisFloeckinger.Core.Identity;
 using PraxisFloeckinger.Core.Tenancy;
 using PraxisFloeckinger.Infrastructure.Tenancy;
@@ -14,11 +15,15 @@ namespace PraxisFloeckinger.Infrastructure.Persistence.Master;
 /// </summary>
 public static class MasterDataSeeder
 {
-    /// <summary>
-    /// Demo-Passwort für BEIDE Dev-Accounts.
-    /// DEV ONLY — niemals in Production verwenden!
-    /// </summary>
+    /// <summary>Demo-Passwort für BEIDE Dev-Accounts. DEV ONLY — niemals in Production!</summary>
     public const string DevPassword = "DevPassword123!";
+
+    /// <summary>
+    /// Festes TOTP-Secret für den Demo-Therapeuten.
+    /// Aus ENV DEV_DEMO_TOTP_SECRET überschreibbar.
+    /// DEV ONLY — niemals in Production!
+    /// </summary>
+    public const string DevTotpSecret = "JBSWY3DPEHPK3PXP";
 
     public static async Task SeedDevelopmentDataAsync(
         MasterDbContext db,
@@ -26,12 +31,15 @@ public static class MasterDataSeeder
         ITenantDbContextFactory tenantDbContextFactory,
         TenantConnectionStringBuilder tenantConnectionStringBuilder,
         IPasswordHasher passwordHasher,
+        ITotpService totpService,
+        IFieldEncryptor fieldEncryptor,
         ILogger logger)
     {
-        logger.LogWarning("DEV ONLY — demo users with predictable passwords.");
+        logger.LogWarning(
+            "DEV ONLY — demo users with predictable passwords. " +
+            "DEV ONLY — demo therapist has fixed TOTP secret. NEVER reuse this in production.");
 
-        // Alten Dummy-Tenant aus Schritt 3 (DbConnectionRef "tenant_dev_*") ersetzen —
-        // der hatte keine echte DB dahinter.
+        // Alten Dummy-Tenant aus Schritt 3 (DbConnectionRef "tenant_dev_*") ersetzen
         var existing = await db.Tenants
             .FirstOrDefaultAsync(t => t.Subdomain == "floeckinger");
 
@@ -43,7 +51,6 @@ public static class MasterDataSeeder
             existing = null;
         }
 
-        // Echten Tenant provisionieren wenn noch nicht vorhanden
         if (existing is null)
         {
             await provisioningService.ProvisionAsync(
@@ -51,7 +58,6 @@ public static class MasterDataSeeder
             existing = await db.Tenants.FirstAsync(t => t.Subdomain == "floeckinger");
         }
 
-        // Demo-Benutzer in der Tenant-DB anlegen (idempotent)
         var connectionString = tenantConnectionStringBuilder.Build(existing.DbConnectionRef);
         var tenantContextStub = new TenantInfo(existing.Id, existing.Subdomain, connectionString);
         await using var tenantDb = tenantDbContextFactory.Create(tenantContextStub);
@@ -61,6 +67,11 @@ public static class MasterDataSeeder
 
         var pwHash = passwordHasher.Hash(DevPassword);
 
+        // Demo-TOTP-Secret aus ENV oder Fallback-Konstante
+        var totpSecretPlain = Environment.GetEnvironmentVariable("DEV_DEMO_TOTP_SECRET")
+            ?? DevTotpSecret;
+        var totpSecretEncrypted = fieldEncryptor.Encrypt(totpSecretPlain);
+
         var therapeut = new User
         {
             Email = "tobias@floeckinger.dev",
@@ -68,6 +79,8 @@ public static class MasterDataSeeder
             Role = UserRole.Therapeut,
             FirstName = "Tobias",
             LastName = "Flöckinger",
+            TotpEnabled = true,
+            TotpSecret = totpSecretEncrypted,
         };
         var patient = new User
         {
@@ -96,7 +109,8 @@ public static class MasterDataSeeder
         await tenantDb.SaveChangesAsync();
 
         logger.LogInformation(
-            "Demo-Benutzer für Dev-Tenant 'floeckinger' angelegt (DB: {DbRef})",
-            existing.DbConnectionRef);
+            "Demo-Benutzer für Dev-Tenant 'floeckinger' angelegt. " +
+            "Therapeut TOTP-Secret (Smoke-Test): {Secret}",
+            totpSecretPlain);
     }
 }

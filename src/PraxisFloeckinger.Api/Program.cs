@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using PraxisFloeckinger.Api.Authentication;
 using PraxisFloeckinger.Api.Tenancy;
+using PraxisFloeckinger.Core.Cryptography;
 using PraxisFloeckinger.Core.Identity;
 using PraxisFloeckinger.Core.Tenancy;
+using PraxisFloeckinger.Infrastructure.Cryptography;
 using PraxisFloeckinger.Infrastructure.Identity;
 using PraxisFloeckinger.Infrastructure.Persistence.Master;
 using PraxisFloeckinger.Infrastructure.Persistence.Tenant;
@@ -49,10 +51,15 @@ builder.Services.AddSingleton<JwtSigningKeyProvider>();
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 
+// 2FA
+builder.Services.AddSingleton<IFieldEncryptor, AesGcmFieldEncryptor>();
+builder.Services.AddSingleton<ITotpService, TotpService>();
+builder.Services.AddScoped<ITwoFactorRecoveryService, TwoFactorRecoveryService>();
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddPraxisJwtBearer();
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options => options.AddMfaPolicies());
 
 // Rate Limiting (Login: 5/min, Refresh: 10/min, beide per IP)
 // RateLimit:LoginPermitLimit / RateLimit:RefreshPermitLimit können in Tests überschrieben werden.
@@ -101,11 +108,14 @@ if (app.Environment.IsDevelopment()
     var tenantFactory = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
     var tenantConnBuilder = scope.ServiceProvider.GetRequiredService<TenantConnectionStringBuilder>();
     var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+    var totpService = scope.ServiceProvider.GetRequiredService<ITotpService>();
+    var fieldEncryptor = scope.ServiceProvider.GetRequiredService<IFieldEncryptor>();
     var logger = scope.ServiceProvider
         .GetRequiredService<ILoggerFactory>()
         .CreateLogger(nameof(MasterDataSeeder));
     await MasterDataSeeder.SeedDevelopmentDataAsync(
-        db, provisioner, tenantFactory, tenantConnBuilder, passwordHasher, logger);
+        db, provisioner, tenantFactory, tenantConnBuilder,
+        passwordHasher, totpService, fieldEncryptor, logger);
 }
 
 app.UseRateLimiter();
@@ -132,7 +142,7 @@ app.MapGet("/api/v1/whoami", (HttpContext ctx) =>
 })
 .WithMetadata(new RequireTenantAttribute())
 .AddEndpointFilter<RequireTenantFilter>()
-.RequireAuthorization();
+.RequireAuthorization(MfaPolicies.RequireFullAuth);
 
 app.MapAuthEndpoints();
 

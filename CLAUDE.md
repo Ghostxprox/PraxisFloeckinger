@@ -23,7 +23,8 @@ und alle Konventionen für dieses Projekt.
 - Schritt 4 (Tenant-Resolver-Middleware): TenantResolverMiddleware, TenantResolver
   mit 60s-Cache, RequireTenantFilter, Dev-Header-Override — abgeschlossen, 33 Tests grün.
 - Schritt 5 (TenantDbContext + Provisioning): TenantDbContext, Entities, Migration, Seeder — abgeschlossen, 44 Tests grün.
-- Aktueller Stand: Schritt 6a (Auth-Foundation: Argon2id + JWT RS256 + Login/Refresh) läuft.
+- Schritt 6a (Auth-Foundation: Argon2id + JWT RS256 + Login/Refresh/Logout) — abgeschlossen, 75 Tests grün.
+- Aktueller Stand: Schritt 6b (TOTP-2FA: Field-Encryption, zweistufiger Login, MFA-Session-Token, Recovery-Codes) läuft.
 - Eine alte ASP.NET MVC-App liegt unter ../Old/ als Referenz (Marketing-Seiten,
   Karriere-Timeline, Coaching mit PriceConfig, Razor-Layout, CSS). Wird erst
   nach der Multi-Tenant-Foundation in PraxisFloeckinger.Web überführt.

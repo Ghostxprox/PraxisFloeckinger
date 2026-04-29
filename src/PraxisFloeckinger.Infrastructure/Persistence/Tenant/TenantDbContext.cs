@@ -24,6 +24,7 @@ public sealed class TenantDbContext : DbContext
     public DbSet<PatientProfile> PatientProfiles => Set<PatientProfile>();
     public DbSet<TherapistProfile> TherapistProfiles => Set<TherapistProfile>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<TwoFactorRecoveryCode> TwoFactorRecoveryCodes => Set<TwoFactorRecoveryCode>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -32,6 +33,7 @@ public sealed class TenantDbContext : DbContext
         ConfigurePatientProfile(modelBuilder);
         ConfigureTherapistProfile(modelBuilder);
         ConfigureRefreshToken(modelBuilder);
+        ConfigureTwoFactorRecoveryCode(modelBuilder);
     }
 
     /// <summary>
@@ -96,7 +98,10 @@ public sealed class TenantDbContext : DbContext
                   .HasMaxLength(50);
 
             entity.Property(e => e.TotpSecret)
-                  .HasMaxLength(200);
+                  .HasMaxLength(500); // AES-GCM verschlüsselt: Base64(12+n+16) > Klartext
+
+            entity.Property(e => e.MustRotateRecoveryCodes)
+                  .HasDefaultValue(false);
 
             entity.Property(e => e.IsDeleted)
                   .HasDefaultValue(false);
@@ -191,6 +196,31 @@ public sealed class TenantDbContext : DbContext
             entity.Property(e => e.CreatedFromUserAgent)
                   .HasMaxLength(512)
                   .IsRequired();
+
+            entity.Property(e => e.IsDeleted)
+                  .HasDefaultValue(false);
+
+            entity.HasQueryFilter(e => !e.IsDeleted);
+
+            entity.HasOne<User>()
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private static void ConfigureTwoFactorRecoveryCode(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TwoFactorRecoveryCode>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.CodeHash)
+                  .HasMaxLength(500)
+                  .IsRequired();
+
+            entity.HasIndex(e => e.UserId)
+                  .HasDatabaseName("IX_TwoFactorRecoveryCodes_UserId");
 
             entity.Property(e => e.IsDeleted)
                   .HasDefaultValue(false);

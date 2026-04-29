@@ -2,6 +2,74 @@
 
 ---
 
+## 2026-04-29 — Schritt 6b: TOTP-2FA mit Field-Encryption, zweistufigem Login, Recovery-Codes
+
+**NuGet (PraxisFloeckinger.Infrastructure):** `Otp.NET 1.4.1`, `QRCoder 1.8.0`
+
+**src/PraxisFloeckinger.Core/Cryptography** — neue Schicht:
+- `IFieldEncryptor.cs` — `Encrypt(string)`, `Decrypt(string)`; App-Layer, DB sieht nie Klartext
+
+**src/PraxisFloeckinger.Core/Identity** — neue Interfaces + Entity:
+- `ITotpService.cs` — `GenerateSecret`, `BuildOtpAuthUri`, `GenerateQrCodePngBase64`, `VerifyCode(windowSteps=1)`
+- `ITwoFactorRecoveryService.cs` — `GenerateAsync(count=10)`, `ConsumeAsync`, `CountRemainingAsync`
+- `TwoFactorRecoveryCode.cs` — sealed SoftDeletableEntityBase+ITenantScoped; CodeHash (Argon2id), UsedAt?
+- `IJwtTokenService.cs` — `IssueAccessToken` um `purpose`-Parameter erweitert (default "access")
+- `User.cs` — `MustRotateRecoveryCodes bool` (default false); `TotpSecret` max 500 (AES-GCM-Ciphertext)
+
+**src/PraxisFloeckinger.Infrastructure/Cryptography** — neu:
+- `AesGcmFieldEncryptor.cs` — AES-256-GCM; Nonce 12 Bytes random; Output Base64(nonce||ciphertext||tag); Key aus `Encryption:DataKey` (32 Bytes Base64); Singleton
+
+**src/PraxisFloeckinger.Infrastructure/Identity** — neue Implementierungen:
+- `TotpService.cs` — Otp.NET; SHA-1, 6 Digits, 30s Step; QR 256×256 PNG (QRCoder); Secret nie geloggt
+- `TwoFactorRecoveryService.cs` — Format "ABCDE-FGHJK" (Alphabet ohne 0/O/1/I/L); Argon2id-Hash; GenerateAsync löscht alte Codes (Soft-Delete)
+- `JwtTokenService.cs` — purpose="mfa" → 5-Minuten-Token; purpose="access" → normales Lifetime; Claim `purpose` im JWT
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant:**
+- `TenantDbContext.cs` — `DbSet<TwoFactorRecoveryCode>`; ConfigureTwoFactorRecoveryCode; TotpSecret max 500; MustRotateRecoveryCodes mit DefaultValue false
+- `Migrations/20260429143356_AddTwoFactorRecoveryCodes.cs` — TwoFactorRecoveryCodes-Tabelle (FK→Users, Index UserId); MustRotateRecoveryCodes bool; TotpSecret max 500
+
+**src/PraxisFloeckinger.Api/Authentication** — erweitert + neue Files:
+- `LoginResponse.cs` — `Status` ("ok"|"mfa_required"|"mfa_setup_required"), nullable Tokens, `MfaSessionToken?`
+- `MfaPolicies.cs` — `RequireMfaSession` (purpose=mfa Claim) + `RequireFullAuth` (purpose=access oder kein Claim)
+- `AuthEndpoints.cs` — Komplett überarbeitet: Login zweistufig (mfa_required / mfa_setup_required); neue Endpoints:
+  - `POST /mfa/verify` [RequireMfaSession] — TOTP-Code → full Token
+  - `POST /mfa/recover` [RequireMfaSession] — Recovery-Code → full Token + setzt MustRotateRecoveryCodes
+  - `POST /mfa/setup` [RequireMfaSession] — generiert Secret+QR, speichert verschlüsselt, TotpEnabled noch false
+  - `POST /mfa/setup/confirm` [RequireMfaSession] — verifiziert Code, setzt TotpEnabled=true, gibt 10 Recovery-Codes zurück
+  - `GET /mfa/status` [RequireFullAuth] — enabled, mustRotateRecoveryCodes, recoveryCodesRemaining
+  - `POST /mfa/disable` [RequireFullAuth] — Pwd+Code; 403 für Pflicht-MFA-Rollen; Patient: kein Code nötig wenn TotpEnabled=false
+- DTOs: `MfaVerifyRequest`, `MfaRecoverRequest`, `MfaDisableRequest`
+
+**src/PraxisFloeckinger.Api/Program.cs** — erweitert:
+- `AddSingleton<IFieldEncryptor, AesGcmFieldEncryptor>()`
+- `AddSingleton<ITotpService, TotpService>()`
+- `AddScoped<ITwoFactorRecoveryService, TwoFactorRecoveryService>()`
+- `AddAuthorization(options => options.AddMfaPolicies())`
+- Seeder-Aufruf mit neuen Services; `/api/v1/whoami` mit `RequireFullAuth`
+
+**src/PraxisFloeckinger.Api/appsettings.json** — `Encryption:DataKey` leer (Prod: ENV/Secret-Store)
+**src/PraxisFloeckinger.Api/appsettings.Development.json** — `Encryption:DataKey` gesetzt (32 Bytes Base64)
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDataSeeder.cs** — überarbeitet:
+- Demo-Therapeut bekommt fixes TOTP-Secret `JBSWY3DPEHPK3PXP` (DEV ONLY, via `DEV_DEMO_TOTP_SECRET` ENV überschreibbar); verschlüsselt gespeichert; TotpEnabled=true
+- Demo-Patient bleibt ohne 2FA
+- LogWarning: "DEV ONLY — demo therapist has fixed TOTP secret. NEVER reuse this in production."
+
+**tests/PraxisFloeckinger.Tests/Infrastructure — neue Tests:**
+- `AesGcmFieldEncryptorTests.cs` — 5 Tests (Roundtrip, verschiedene Nonces, tampered→Exception, falscher Key-Length, fehlender Key)
+- `TotpServiceTests.cs` — 5 Tests (Secret-Länge, otpauth-URI, QR-Code, Valid-Code, Code 65s alt rejected)
+- `TwoFactorRecoveryServiceTests.cs` — 6 Tests (Format, Consume, Reuse→false, Invalid, Replace, CountRemaining)
+
+**tests/PraxisFloeckinger.Tests/Api — neue Tests:**
+- `MfaFlowTests.cs` — 12 End-to-End-Tests via IClassFixture<MfaTestFixture>:
+  Patient→ok; Therapeut ohne MFA→mfa_setup_required; MfaSetup QR; MfaSetupConfirm+RecoveryCodes; MfaSetupConfirm ungültig; Login mit MFA→mfa_required; MfaVerify gültig; MfaVerify ungültig; Recover gültig+MustRotate; Recover wiederverwendet→401; MfaDisable Patient; MfaDisable Therapeut→403
+- `AuthEndpointsTests.cs` — Fixture: User auf Patient-Rolle geändert (kein Pflicht-MFA); LoginResponse nullable-Assertions fixiert
+
+**dotnet build** — 0 Fehler, 0 Warnungen
+**dotnet test** — 103/103 grün (75 Schritt 6a + 28 neu)
+
+---
+
 ## 2026-04-28 — Schritt 6a: Authentication Foundation
 
 **src/PraxisFloeckinger.Core/Identity** — neue Interfaces + Entities:

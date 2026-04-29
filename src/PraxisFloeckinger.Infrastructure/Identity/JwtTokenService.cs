@@ -8,8 +8,9 @@ using PraxisFloeckinger.Core.Tenancy;
 namespace PraxisFloeckinger.Infrastructure.Identity;
 
 /// <summary>
-/// Gibt RS256-signierte Access-JWTs aus.
-/// Lifetime und Issuer/Audience kommen aus Konfiguration.
+/// Gibt RS256-signierte JWTs aus.
+/// purpose="access": normaler Access-Token (aus Konfiguration).
+/// purpose="mfa": 5-Minuten-MFA-Session-Token.
 /// </summary>
 public sealed class JwtTokenService : IJwtTokenService
 {
@@ -29,10 +30,13 @@ public sealed class JwtTokenService : IJwtTokenService
     }
 
     public TimeSpan AccessTokenLifetime { get; }
+    public TimeSpan MfaSessionTokenLifetime { get; } = TimeSpan.FromMinutes(5);
 
-    public string IssueAccessToken(User user, ITenantContext tenant)
+    public string IssueAccessToken(User user, ITenantContext tenant, string purpose = "access")
     {
+        var lifetime = purpose == "mfa" ? MfaSessionTokenLifetime : AccessTokenLifetime;
         var now = DateTimeOffset.UtcNow;
+
         var claims = new[]
         {
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
@@ -40,6 +44,7 @@ public sealed class JwtTokenService : IJwtTokenService
             new Claim("role", user.Role.ToString()),
             new Claim("tenant_id", tenant.TenantId.ToString()),
             new Claim("tenant_sub", tenant.Subdomain),
+            new Claim("purpose", purpose),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
 
@@ -52,7 +57,7 @@ public sealed class JwtTokenService : IJwtTokenService
             audience: _audience,
             claims: claims,
             notBefore: now.UtcDateTime,
-            expires: now.Add(AccessTokenLifetime).UtcDateTime,
+            expires: now.Add(lifetime).UtcDateTime,
             signingCredentials: credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);

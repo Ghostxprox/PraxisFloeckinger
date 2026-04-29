@@ -42,9 +42,11 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthTestFixture>
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<LoginResponse>();
         body.Should().NotBeNull();
-        body!.AccessToken.Should().NotBeNullOrEmpty();
+        body!.Status.Should().Be("ok");
+        body.AccessToken.Should().NotBeNullOrEmpty();
         body.RefreshToken.Should().NotBeNullOrEmpty();
-        body.AccessTokenExpiresAt.Should().BeAfter(DateTimeOffset.UtcNow);
+        body.AccessTokenExpiresAt.Should().NotBeNull();
+        body.AccessTokenExpiresAt!.Value.Should().BeAfter(DateTimeOffset.UtcNow);
     }
 
     [Fact]
@@ -197,7 +199,7 @@ public sealed class AuthEndpointsTests : IClassFixture<AuthTestFixture>
             headers: _fixture.TenantHeader);
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<LoginResponse>();
-        return (body!.AccessToken, body.RefreshToken);
+        return (body!.AccessToken!, body.RefreshToken!);
     }
 }
 
@@ -255,11 +257,12 @@ public sealed class AuthTestFixture : IAsyncLifetime
         var hasher = new Argon2idPasswordHasher(NullLogger<Argon2idPasswordHasher>.Instance);
         var pwHash = hasher.Hash(TestPassword);
 
+        // Patient-Rolle → kein Pflicht-MFA → bestehende Auth-Tests bleiben grün
         tenantCtx.Users.Add(new User
         {
             Email = TherapistEmail,
             PasswordHash = pwHash,
-            Role = UserRole.Therapeut,
+            Role = UserRole.Patient,
             FirstName = "Auth",
             LastName = "Test",
         });
@@ -284,6 +287,7 @@ public sealed class AuthTestFixture : IAsyncLifetime
                         ["Jwt:AccessTokenMinutes"] = "15",
                         ["RateLimit:LoginPermitLimit"] = "10000",
                         ["RateLimit:RefreshPermitLimit"] = "10000",
+                        ["Encryption:DataKey"] = "UCtsfxg9zFWOxLxPNzOSMPva3ErIlXMbroDCCc1nBYY=",
                     }));
             });
 

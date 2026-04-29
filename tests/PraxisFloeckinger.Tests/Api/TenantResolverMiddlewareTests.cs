@@ -165,6 +165,7 @@ public sealed class TenantResolverMiddlewareTests
                     // Rate-Limiting in Tests hochschrauben
                     ["RateLimit:LoginPermitLimit"] = "10000",
                     ["RateLimit:RefreshPermitLimit"] = "10000",
+                    ["Encryption:DataKey"] = "UCtsfxg9zFWOxLxPNzOSMPva3ErIlXMbroDCCc1nBYY=",
                 }));
 
             builder.ConfigureServices(services =>
