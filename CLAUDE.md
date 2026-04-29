@@ -25,7 +25,8 @@ und alle Konventionen für dieses Projekt.
 - Schritt 5 (TenantDbContext + Provisioning): TenantDbContext, Entities, Migration, Seeder — abgeschlossen, 44 Tests grün.
 - Schritt 6a (Auth-Foundation: Argon2id + JWT RS256 + Login/Refresh/Logout) — abgeschlossen, 75 Tests grün.
 - Schritt 6b (TOTP-2FA: Field-Encryption, zweistufiger Login, MFA-Session-Token, Recovery-Codes) — abgeschlossen, 103 Tests grün.
-- Aktueller Stand: Schritt 6c (Rollen-basierte Authorization-Policies + Account-Lockout) läuft.
+- Schritt 6c (Rollen-basierte Authorization-Policies + Account-Lockout) — abgeschlossen, 120 Tests grün.
+- Aktueller Stand: Schritt 7 (noch nicht begonnen).
 - Eine alte ASP.NET MVC-App liegt unter ../Old/ als Referenz (Marketing-Seiten,
   Karriere-Timeline, Coaching mit PriceConfig, Razor-Layout, CSS). Wird erst
   nach der Multi-Tenant-Foundation in PraxisFloeckinger.Web überführt.
@@ -72,6 +73,12 @@ enthalten. Sie kommuniziert ausschließlich per mTLS-gesichertem HTTP mit der Ap
 **TODO (später):** Architektur-Test mit NetArchTest ergänzen, der diese Regeln
 automatisch verifiziert — damit kein versehentliches `ProjectReference` diese
 Grenze überschreitet.
+
+## Changes-Datei Konvention
+- `Changes`: nur der jeweils aktuellste Schritt
+- `docs/changes-history.md`: vollständige Historie aller bisherigen Schritte
+- Bei jedem neuen Schritt: vorherigen Inhalt aus `Changes` nach oben in
+  `docs/changes-history.md` verschieben, dann neuen Eintrag in `Changes` schreiben
 
 ## Was du nicht tun sollst
 - Keine US-gehosteten Dependencies (DSGVO)

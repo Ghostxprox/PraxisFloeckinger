@@ -1,0 +1,436 @@
+# Changes — Historie
+
+Vollständige Änderungshistorie aller abgeschlossenen Schritte.
+Aktuellster Schritt: siehe [../Changes](../Changes).
+
+---
+
+## 2026-04-29 — Schritt 6b: TOTP-2FA mit Field-Encryption, zweistufigem Login, Recovery-Codes
+
+**NuGet (PraxisFloeckinger.Infrastructure):** `Otp.NET 1.4.1`, `QRCoder 1.8.0`
+
+**src/PraxisFloeckinger.Core/Cryptography** — neue Schicht:
+- `IFieldEncryptor.cs` — `Encrypt(string)`, `Decrypt(string)`; App-Layer, DB sieht nie Klartext
+
+**src/PraxisFloeckinger.Core/Identity** — neue Interfaces + Entity:
+- `ITotpService.cs` — `GenerateSecret`, `BuildOtpAuthUri`, `GenerateQrCodePngBase64`, `VerifyCode(windowSteps=1)`
+- `ITwoFactorRecoveryService.cs` — `GenerateAsync(count=10)`, `ConsumeAsync`, `CountRemainingAsync`
+- `TwoFactorRecoveryCode.cs` — sealed SoftDeletableEntityBase+ITenantScoped; CodeHash (Argon2id), UsedAt?
+- `IJwtTokenService.cs` — `IssueAccessToken` um `purpose`-Parameter erweitert (default "access")
+- `User.cs` — `MustRotateRecoveryCodes bool` (default false); `TotpSecret` max 500 (AES-GCM-Ciphertext)
+
+**src/PraxisFloeckinger.Infrastructure/Cryptography** — neu:
+- `AesGcmFieldEncryptor.cs` — AES-256-GCM; Nonce 12 Bytes random; Output Base64(nonce||ciphertext||tag); Key aus `Encryption:DataKey` (32 Bytes Base64); Singleton
+
+**src/PraxisFloeckinger.Infrastructure/Identity** — neue Implementierungen:
+- `TotpService.cs` — Otp.NET; SHA-1, 6 Digits, 30s Step; QR 256×256 PNG (QRCoder); Secret nie geloggt
+- `TwoFactorRecoveryService.cs` — Format "ABCDE-FGHJK" (Alphabet ohne 0/O/1/I/L); Argon2id-Hash; GenerateAsync löscht alte Codes (Soft-Delete)
+- `JwtTokenService.cs` — purpose="mfa" → 5-Minuten-Token; purpose="access" → normales Lifetime; Claim `purpose` im JWT
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant:**
+- `TenantDbContext.cs` — `DbSet<TwoFactorRecoveryCode>`; ConfigureTwoFactorRecoveryCode; TotpSecret max 500; MustRotateRecoveryCodes mit DefaultValue false
+- `Migrations/20260429143356_AddTwoFactorRecoveryCodes.cs` — TwoFactorRecoveryCodes-Tabelle (FK→Users, Index UserId); MustRotateRecoveryCodes bool; TotpSecret max 500
+
+**src/PraxisFloeckinger.Api/Authentication** — erweitert + neue Files:
+- `LoginResponse.cs` — `Status` ("ok"|"mfa_required"|"mfa_setup_required"), nullable Tokens, `MfaSessionToken?`
+- `MfaPolicies.cs` — `RequireMfaSession` (purpose=mfa Claim) + `RequireFullAuth` (purpose=access oder kein Claim)
+- `AuthEndpoints.cs` — Komplett überarbeitet: Login zweistufig (mfa_required / mfa_setup_required); neue Endpoints:
+  - `POST /mfa/verify` [RequireMfaSession] — TOTP-Code → full Token
+  - `POST /mfa/recover` [RequireMfaSession] — Recovery-Code → full Token + setzt MustRotateRecoveryCodes
+  - `POST /mfa/setup` [RequireMfaSession] — generiert Secret+QR, speichert verschlüsselt, TotpEnabled noch false
+  - `POST /mfa/setup/confirm` [RequireMfaSession] — verifiziert Code, setzt TotpEnabled=true, gibt 10 Recovery-Codes zurück
+  - `GET /mfa/status` [RequireFullAuth] — enabled, mustRotateRecoveryCodes, recoveryCodesRemaining
+  - `POST /mfa/disable` [RequireFullAuth] — Pwd+Code; 403 für Pflicht-MFA-Rollen; Patient: kein Code nötig wenn TotpEnabled=false
+- DTOs: `MfaVerifyRequest`, `MfaRecoverRequest`, `MfaDisableRequest`
+
+**src/PraxisFloeckinger.Api/Program.cs** — erweitert:
+- `AddSingleton<IFieldEncryptor, AesGcmFieldEncryptor>()`
+- `AddSingleton<ITotpService, TotpService>()`
+- `AddScoped<ITwoFactorRecoveryService, TwoFactorRecoveryService>()`
+- `AddAuthorization(options => options.AddMfaPolicies())`
+- Seeder-Aufruf mit neuen Services; `/api/v1/whoami` mit `RequireFullAuth`
+
+**src/PraxisFloeckinger.Api/appsettings.json** — `Encryption:DataKey` leer (Prod: ENV/Secret-Store)
+**src/PraxisFloeckinger.Api/appsettings.Development.json** — `Encryption:DataKey` gesetzt (32 Bytes Base64)
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDataSeeder.cs** — überarbeitet:
+- Demo-Therapeut bekommt fixes TOTP-Secret `JBSWY3DPEHPK3PXP` (DEV ONLY, via `DEV_DEMO_TOTP_SECRET` ENV überschreibbar); verschlüsselt gespeichert; TotpEnabled=true
+- Demo-Patient bleibt ohne 2FA
+- LogWarning: "DEV ONLY — demo therapist has fixed TOTP secret. NEVER reuse this in production."
+
+**tests/PraxisFloeckinger.Tests/Infrastructure — neue Tests:**
+- `AesGcmFieldEncryptorTests.cs` — 5 Tests (Roundtrip, verschiedene Nonces, tampered→Exception, falscher Key-Length, fehlender Key)
+- `TotpServiceTests.cs` — 5 Tests (Secret-Länge, otpauth-URI, QR-Code, Valid-Code, Code 65s alt rejected)
+- `TwoFactorRecoveryServiceTests.cs` — 6 Tests (Format, Consume, Reuse→false, Invalid, Replace, CountRemaining)
+
+**tests/PraxisFloeckinger.Tests/Api — neue Tests:**
+- `MfaFlowTests.cs` — 12 End-to-End-Tests via IClassFixture<MfaTestFixture>:
+  Patient→ok; Therapeut ohne MFA→mfa_setup_required; MfaSetup QR; MfaSetupConfirm+RecoveryCodes; MfaSetupConfirm ungültig; Login mit MFA→mfa_required; MfaVerify gültig; MfaVerify ungültig; Recover gültig+MustRotate; Recover wiederverwendet→401; MfaDisable Patient; MfaDisable Therapeut→403
+- `AuthEndpointsTests.cs` — Fixture: User auf Patient-Rolle geändert (kein Pflicht-MFA); LoginResponse nullable-Assertions fixiert
+
+**dotnet build** — 0 Fehler, 0 Warnungen
+**dotnet test** — 103/103 grün (75 Schritt 6a + 28 neu)
+
+---
+
+## 2026-04-28 — Schritt 6a: Authentication Foundation
+
+**src/PraxisFloeckinger.Core/Identity** — neue Interfaces + Entities:
+- `IPasswordHasher.cs` — `Hash`, `Verify`, `NeedsRehash`
+- `IJwtTokenService.cs` — `AccessTokenLifetime`, `IssueAccessToken(User, ITenantContext)`
+- `IRefreshTokenService.cs` — `IssueAsync`, `ValidateAsync`, `RevokeAsync`, `RevokeAllForUserAsync`
+- `RefreshToken.cs` — sealed, SoftDeletableEntityBase + ITenantScoped; TokenHash (SHA-256-Hex, 64), ExpiresAt, RevokedAt?, RevokedReason?, CreatedFromIp, CreatedFromUserAgent
+
+**src/PraxisFloeckinger.Infrastructure/Identity** — neue Implementierungen:
+- `Argon2idPasswordHasher.cs` — PHC-Format `$argon2id$v=19$m=65536,t=3,p=4$…`; m=64 MB, t=3, p=4; CryptographicOperations.FixedTimeEquals; NeedsRehash prüft Parameter
+- `JwtSigningKeyProvider.cs` — Singleton; RSA-2048 PEM-Datei; auto-generiert in Development; exportiert SigningKey (privat) + ValidationKey (nur Public Key)
+- `JwtTokenService.cs` — RS256; Claims: sub, email, role, tenant_id, tenant_sub, jti; konfigurierbares Lifetime (Jwt:AccessTokenMinutes)
+- `RefreshTokenService.cs` — SHA-256-Hash des Raw-Tokens gespeichert; Lifetimes: Patient=24h, Staff=8h, RememberMe=30d; Token-Rotation via RevokeAsync("rotation")
+
+**src/PraxisFloeckinger.Api/Authentication** — neues Verzeichnis:
+- `JwtBearerConfiguration.cs` — `AddPraxisJwtBearer()`; MapInboundClaims=false; IOptions-Late-Binding via `Configure<JwtSigningKeyProvider, IConfiguration>`
+- `AuthEndpoints.cs` — `/api/v1/auth/login`, `/refresh`, `/logout`; tenant-scoped Services via `ctx.RequestServices`; RequireRateLimiting("login"/"refresh")
+- `TokenTenantValidatorMiddleware.cs` — 403 wenn JWT `tenant_id` ≠ aufgelöster Tenant
+- DTOs: `LoginRequest`, `LoginResponse`, `RefreshRequest`, `LogoutRequest`
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant:**
+- `TenantDbContext.cs` — `DbSet<RefreshToken>` ergänzt; Unique-Index auf TokenHash, Index auf UserId, Soft-Delete-Filter
+- `Migrations/20260428203815_AddRefreshTokens.cs` — erstellt RefreshTokens-Tabelle
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDataSeeder.cs** — überarbeitet:
+- Nimmt `IPasswordHasher` entgegen; legt Demo-Passwort via `passwordHasher.Hash("DevPassword123!")` an; `DEV ONLY`-LogWarning
+
+**src/PraxisFloeckinger.Api/Program.cs** — erweitert:
+- `AddRateLimiter` (Login: 5/min/IP, Refresh: 10/min/IP; via `RateLimit:*PermitLimit` konfigurierbar)
+- `AddAuthentication().AddPraxisJwtBearer()`, `AddAuthorization()`
+- `AddSingleton<IPasswordHasher>`, `AddSingleton<JwtSigningKeyProvider>`, `AddSingleton<IJwtTokenService>`, `AddScoped<IRefreshTokenService>`
+- Middleware-Reihenfolge: `UseRateLimiter → TenantResolverMiddleware → UseAuthentication → TokenTenantValidatorMiddleware → UseAuthorization`
+- `app.MapAuthEndpoints()`; `/api/v1/whoami` liest aus ClaimsPrincipal statt ITenantContext
+
+**src/PraxisFloeckinger.Api/appsettings.json / appsettings.Development.json** — `Jwt:`-Sektion ergänzt
+
+**tests/PraxisFloeckinger.Tests/Infrastructure:**
+- `Argon2idPasswordHasherTests.cs` — 7 Tests (PHC-Format, Salting, Verify, NeedsRehash)
+- `JwtTokenServiceTests.cs` — 4 Tests (Claims, Signatur, Lifetime, falscher Issuer)
+- `RefreshTokenServiceTests.cs` — 8 Tests (Hash-Sicherheit, Validate, Revoke, Lifetimes, RevokeAll)
+
+**tests/PraxisFloeckinger.Tests/Api:**
+- `AuthEndpointsTests.cs` — 12 Tests via IClassFixture<AuthTestFixture>; Login/Refresh/Logout/Whoami/Cross-Tenant
+- `TenantResolverMiddlewareTests.cs` — Fake-Auth-Handler (TestAuthHandler) ersetzt JWT; gemeinsamer RSA-Key in Temp-Dir
+
+**dotnet build** — 0 Fehler, 0 Warnungen
+**dotnet test** — 75/75 grün
+
+**Commit:** `feat(auth): add argon2id hasher, jwt rs256 issuer, refresh token rotation, login/refresh/logout endpoints with rate limiting and cross-tenant token validation`
+
+---
+
+## 2026-04-27 — Schritt 5: TenantDbContext + Tenant-Provisioning
+
+**Mini-Cleanup: MSB3277-Warning behoben**
+- `tests/PraxisFloeckinger.Tests/PraxisFloeckinger.Tests.csproj` — explizite `Microsoft.EntityFrameworkCore.Relational 9.*`-Referenz ergänzt (löst Diamond-Konflikt zwischen Mvc.Testing 9.0.1 und EF Core 9.0.15)
+
+**src/PraxisFloeckinger.Core/Identity** — neue Entities:
+- `User.cs` — sealed, SoftDeletableEntityBase + IAuditable + ITenantScoped; Email (max 320), PasswordHash (Argon2id, max 500), Role, FirstName/LastName (max 100), Phone (max 50), TotpEnabled/TotpSecret (max 200)
+- `PatientProfile.cs` — 1:1 zu User; BirthDate, Address (max 500), EmergencyContact/InsuranceInfo/PublicNotes
+- `TherapistProfile.cs` — 1:1 zu User; Specializations (text[], max 20 Einträge), Bio (max 5000), IsSupervisor
+
+**src/PraxisFloeckinger.Core/Tenancy** — neues Interface:
+- `ITenantProvisioningService.cs` — `Task ProvisionAsync(string subdomain, string displayName, LicenseTier tier, CancellationToken ct)`
+
+**src/PraxisFloeckinger.Infrastructure/Tenancy** — neue Dateien:
+- `ITenantDbContextFactory.cs` — in Infrastructure (nicht Core) wegen TenantDbContext-Rückgabetyp; `TenantDbContext Create(ITenantContext)`
+- `TenantProvisioningService.cs` — sealed; CREATE DATABASE via server-level NpgsqlConnection (außerhalb Transaktion), Tenant-Row in Master-DB, MigrateAsync auf neue DB; nicht idempotent (TODO: Recovery-Logik)
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant** — neues Verzeichnis:
+- `TenantDbContext.cs` — DbSets Users/PatientProfiles/TherapistProfiles; SaveChangesAsync-Override setzt ModifiedAt (Modified) + DeletedAt (IsDeleted-Übergang false→true); Global Query Filters für Soft-Delete; 1:1-Relationships mit Cascade; text[] + Check-Constraint für Specializations
+- `TenantDbContextFactory.cs` — Singleton; baut DbContextOptionsBuilder<TenantDbContext> aus ConnectionString; `ITenantDbContextFactory`-Implementierung
+- `TenantDbContextDesignTimeFactory.cs` — liest ENV `ConnectionStrings__TenantDesignTime`; Fallback auf Dev-String; Stub-TenantContext mit Guid.Empty für dotnet-ef
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Tenant/Migrations:**
+- `20260427171826_InitialTenant.cs` — erstellt Users, PatientProfiles, TherapistProfiles mit allen Constraints
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDbContext.cs** — using-Aliases ergänzt:
+- `using TenantEntity = PraxisFloeckinger.Core.Tenancy.Tenant;`
+- `using LicenseEventEntity = PraxisFloeckinger.Core.Tenancy.LicenseEvent;`
+- Löst CS0118-Kollision mit neuem Namespace `Persistence.Tenant`
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDataSeeder.cs** — komplett überarbeitet:
+- Neue Signatur: `SeedDevelopmentDataAsync(db, provisioningService, tenantDbContextFactory, tenantConnectionStringBuilder, logger)`
+- Entfernt alten Dummy-Tenant (DbConnectionRef startsWith "tenant_dev_"), provisioniert echte Tenant-DB
+- Legt Demo-Therapeut + Demo-Patient + TherapistProfile + PatientProfile in Tenant-DB an (idempotent via `Users.AnyAsync()`)
+
+**src/PraxisFloeckinger.Api/Program.cs** — erweitert:
+- `AddSingleton<ITenantDbContextFactory, TenantDbContextFactory>`
+- `AddScoped<TenantDbContext>` via Factory
+- `AddScoped<ITenantProvisioningService, TenantProvisioningService>`
+- Startup-Block ruft MasterDataSeeder mit neuer Signatur
+
+**tests/PraxisFloeckinger.Tests/Infrastructure/TenantDbContextTests.cs** — 8 neue Tests:
+- Migration_AllTablesExist
+- SoftDelete_User_HiddenFromNormalQuery_VisibleWithIgnoreQueryFilters
+- SaveChangesAsync_SoftDelete_SetsDeletedAt
+- SaveChangesAsync_Update_SetsModifiedAt
+- SaveChangesAsync_SecondSoftDelete_DoesNotOverwriteDeletedAt
+- PatientProfile_CascadeDelete_WhenUserHardDeleted
+- TherapistProfile_Specializations_PersistedAsTextArray
+
+**tests/PraxisFloeckinger.Tests/Infrastructure/TenantProvisioningServiceTests.cs** — 4 neue Tests:
+- ProvisionAsync_CreatesDbAndTenantRow
+- ProvisionAsync_TenantTablesExistAfterProvisioning
+- ProvisionAsync_DuplicateSubdomain_ThrowsInvalidOperationException
+- ProvisionAsync_TenantId_IsPersistedCorrectly
+
+**dotnet build** — 0 Fehler, 0 Warnungen
+**dotnet test** — 44/44 grün
+
+**Commit:** `feat(infra): add tenant DbContext with users/patients/therapists, provisioning service, first tenant migration; dev seeder provisions real tenant DB`
+
+---
+
+## 2026-04-27 — Schritt 4: Tenant-Resolver-Middleware
+
+**src/PraxisFloeckinger.Core/Tenancy** — neue Dateien:
+- `TenantContext.cs` — sealed class, implementiert ITenantContext; Request-scoped DI-Instanz
+- `ITenantResolver.cs` — Interface: `Task<TenantInfo?> ResolveAsync(string, CancellationToken)`
+
+**src/PraxisFloeckinger.Infrastructure/Tenancy** — neues Verzeichnis:
+- `TenantConnectionStringBuilder.cs` — liest ConnectionStrings:TenantTemplate aus IConfiguration,
+  ersetzt `{DB}` durch `Tenant.DbConnectionRef`; Singleton; Connection-String nie loggen
+- `TenantResolver.cs` — sealed, implementiert ITenantResolver; Dependencies: MasterDbContext,
+  IMemoryCache, TenantConnectionStringBuilder, ILogger; 60-Sekunden-Cache (inkl. null-Caching
+  für unbekannte/inaktive Subdomains); DB-Abfrage nur bei Cache-Miss
+
+**src/PraxisFloeckinger.Infrastructure/Persistence/Master/MasterDataSeeder.cs** — neu:
+- Idempotenter Dev-Seed; legt Tenant `floeckinger`/`tenant_dev_floeckinger` an wenn noch keiner existiert
+- Nur aufgerufen wenn `IsDevelopment() && RunMigrationsOnStartup=true`
+
+**src/PraxisFloeckinger.Api/Tenancy** — neues Verzeichnis:
+- `RequireTenantAttribute.cs` — Marker-Attribut `[RequireTenant]`
+- `RequireTenantFilter.cs` — IEndpointFilter; 400 Problem Details wenn kein TenantContext in Items
+- `TenantResolverMiddleware.cs` — liest Subdomain:
+  1. Dev: Header `X-Tenant-Subdomain` (nur wenn `IsDevelopment()`)
+  2. Host-Parsing gegen `Tenancy:RootDomains`-Array (loopback wird nie aufgelöst)
+  - Kein Tenant → next() ohne TenantContext
+  - Tenant gefunden → `HttpContext.Items["TenantContext"] = new TenantContext(...)`
+  - Subdomain vorhanden aber unbekannt → 404 Problem Details
+
+**src/PraxisFloeckinger.Api/Program.cs** — vollständig neu:
+- AddMemoryCache, AddHttpContextAccessor
+- AddDbContext<MasterDbContext> mit ConnectionStrings:Master
+- AddSingleton<TenantConnectionStringBuilder>, AddScoped<ITenantResolver, TenantResolver>
+- AddScoped<ITenantContext> — liest aus HttpContext.Items (wirft bei Zugriff außerhalb Tenant-Request)
+- Startup: MigrateAsync + MasterDataSeeder wenn Development && RunMigrationsOnStartup=true
+- UseMiddleware<TenantResolverMiddleware>
+- Endpoints: GET /healthz (kein Tenant), GET /api/v1/whoami (RequireTenantFilter)
+- `public partial class Program;` für WebApplicationFactory
+
+**src/PraxisFloeckinger.Api/appsettings.json** — ConnectionStrings:TenantTemplate + Tenancy:RootDomains ergänzt
+**src/PraxisFloeckinger.Api/appsettings.Development.json** — TenantTemplate + RootDomains mit echten Dev-Werten
+
+**CLAUDE.md** — Aktueller Projekt-Stand auf Schritt 4 aktualisiert;
+  Tests → Api-Referenz (WebApplicationFactory) in Projekt-Referenz-Regeln ergänzt
+
+**src/PraxisFloeckinger.Infrastructure/PraxisFloeckinger.Infrastructure.csproj**:
+- Microsoft.Extensions.Caching.Abstractions 9.* hinzugefügt
+
+**tests/PraxisFloeckinger.Tests/PraxisFloeckinger.Tests.csproj**:
+- Microsoft.AspNetCore.Mvc.Testing 9.* hinzugefügt
+- ProjectReference auf PraxisFloeckinger.Api hinzugefügt
+
+**tests/PraxisFloeckinger.Tests/Infrastructure/TenantResolverTests.cs** — 4 neue Tests:
+- ResolveAsync_KnownActiveSubdomain_ReturnsTenantInfo
+- ResolveAsync_UnknownSubdomain_ReturnsNullAndCachesResult
+- ResolveAsync_InactiveTenant_ReturnsNull
+- ResolveAsync_CalledTwiceWithinTtl_HitsCacheNotDb (löscht Tenant nach Cache-Befüllung)
+
+**tests/PraxisFloeckinger.Tests/Api/TenantResolverMiddlewareTests.cs** — 6 neue Tests via WebApplicationFactory:
+- Request_OhneSubdomain_PassesThrough_NoTenantRequired
+- Request_MitDevHeader_ResolvesTenant_Returns200
+- Request_MitDevHeader_ImNichtDevelopmentMode_IgnoriertHeader_Returns400
+- Request_MitUnbekannterSubdomain_Returns404WithProblemDetails
+- Request_MitInaktivemTenant_Returns404
+- Request_AnRequireTenantEndpoint_OhneTenant_Returns400WithProblemDetails
+- Fix: `RunMigrationsOnStartup=false` in TestFactory damit keine echte DB nötig
+
+**dotnet build** — 0 Fehler (1 MSB3277 MSBuild-Warnung, benign, unverändert)
+**dotnet test** — 33/33 grün (23 aus Schritt 3 + 10 neue)
+**dotnet run + curl** — alle 4 Szenarien verifiziert:
+  GET /healthz → 200 `{"status":"healthy"}`
+  GET /api/v1/whoami + X-Tenant-Subdomain: floeckinger → 200 `{tenantId, subdomain}`
+  GET /api/v1/whoami + X-Tenant-Subdomain: existiert-nicht → 404 Problem Details
+  GET /api/v1/whoami (kein Header) → 400 Problem Details
+
+**Commit:** `feat(api): add tenant resolver middleware with caching, require-tenant filter, dev header override, dummy tenant seed`
+
+---
+
+## 2026-04-26 — dotnet-ef Tool-Pinning + Schritt 3: Infrastructure / Master-DB
+
+**Commit:** `6c2cb75 chore: pin dotnet-ef as local tool (EF Core 9)`
+- `.config/dotnet-tools.json` angelegt — dotnet-ef 9.0.15 als lokales Tool gepinnt
+- Ausführung via `dotnet tool run dotnet-ef`
+
+**docker-compose.yml** angelegt
+- Service postgres:16-alpine, Port 5432, Volume pgdata, Healthcheck (pg_isready), Restart unless-stopped
+- POSTGRES_PASSWORD kommt aus `.env` (nicht committet)
+
+**.env.example** angelegt (Template für lokale Dev-Credentials)
+
+**README.md** angelegt
+- Local Setup: docker compose up, dotnet tool restore, dotnet ef database update, dotnet test
+
+**src/PraxisFloeckinger.Core** — neue Entities (Master-DB, kein ITenantScoped):
+- `Tenancy/LicenseTier.cs` — Enum (Trial=1..Enterprise=4, stabile Werte)
+- `Tenancy/LicenseEventType.cs` — Enum (TrialStarted=1..Cancelled=5, stabile Werte)
+- `Tenancy/Tenant.cs` — Subdomain (unique, init), DisplayName, DbConnectionRef (init), LicenseTier, IsActive
+- `Tenancy/LicenseEvent.cs` — TenantId FK, EventType, EffectiveAt, Note
+- `Identity/SystemAdmin.cs` — Email (unique), FullName, PasswordHash (Argon2id), TotpEnabled, TotpSecret
+
+**src/PraxisFloeckinger.Infrastructure** — neue Pakete + Persistence:
+- EF Core 9.0.15, Npgsql 9.0.4, Microsoft.Extensions.Configuration.Abstractions 9.0.15
+- Microsoft.EntityFrameworkCore.Design 9.0.15 (PrivateAssets=all) in Infrastructure + Api
+- `Persistence/Master/MasterDbContext.cs` — DbSets für Tenants/LicenseEvents/SystemAdmins, Unique Indexes, MaxLength, Soft-Delete Global Query Filter für SystemAdmin
+- `Persistence/Master/MasterDbContextFactory.cs` — IDesignTimeDbContextFactory für dotnet-ef
+- `Persistence/Master/Migrations/20260426162329_InitialMaster` — erste Migration (nur generiert, nicht applied)
+
+**src/PraxisFloeckinger.Api/appsettings.Development.json** — ConnectionStrings:Master hinzugefügt
+**src/PraxisFloeckinger.Api/appsettings.json** — leerer Master-ConnectionString-Platzhalter
+
+**tests/PraxisFloeckinger.Tests** — Testcontainers 4.11.0 hinzugefügt
+- `UnitTest1.cs` gelöscht
+- `Core/EnumStabilityTests.cs` — LicenseTier + LicenseEventType ergänzt
+- `Infrastructure/MasterDbContextTests.cs` — 7 Tests gegen echte Postgres via Testcontainers:
+  AllMigrations_Apply, Tenant_Create/Read, Subdomain_Uniqueness, LicenseEvent_Create,
+  SystemAdmin_SoftDelete_Filter, SoftDelete_IgnoreQueryFilters, Email_Uniqueness
+
+**dotnet build** — 0 Fehler (1 MSB3277 MSBuild-Warning wegen Testcontainers/EF-Abhängigkeitskonflikt, kein Roslyn-Error)
+**dotnet test** — 23/23 grün (inkl. Testcontainers gegen postgres:16-alpine)
+
+**Commit:** `1bab87f feat(infra): add master DbContext with tenants, license events, system admins; first migration`
+
+---
+
+## 2026-04-25 — Foundation Cleanup + Schritt 2: Core-Domäne
+
+**global.json** angelegt
+- SDK auf 9.0.203 gepinnt (`rollForward: latestFeature`, kein Sprung auf .NET 10)
+
+**tests/PraxisFloeckinger.Tests/PraxisFloeckinger.Tests.csproj**
+- FluentAssertions entfernt, AwesomeAssertions 9.4.0 (MIT-Fork) hinzugefügt
+
+**src/PraxisFloeckinger.Core/Class1.cs, src/PraxisFloeckinger.Infrastructure/Class1.cs, src/PraxisFloeckinger.Shared/Class1.cs**
+- Template-Platzhalter gelöscht
+
+**Commit:** `574eb6a chore: pin .NET 9 SDK, switch to AwesomeAssertions, remove template scaffolding`
+
+---
+
+**src/PraxisFloeckinger.Core/Common/**
+- `EntityBase.cs` — abstrakte Basisklasse: Guid Id (auto), DateTimeOffset CreatedAt (auto UTC), CreatedBy/ModifiedAt/ModifiedBy
+- `SoftDeletableEntityBase.cs` — erweitert EntityBase: IsDeleted, DeletedAt, DeletedBy
+- `IAuditable.cs` — Marker-Interface für Audit-Log-Pflicht
+- `ITenantScoped.cs` — Marker-Interface für Tenant-DB-Entitäten
+
+**src/PraxisFloeckinger.Core/Tenancy/**
+- `ITenantContext.cs` — Interface: TenantId, Subdomain, ConnectionString
+- `TenantInfo.cs` — sealed record, implementiert ITenantContext
+
+**src/PraxisFloeckinger.Core/Identity/**
+- `UserRole.cs` — Enum mit stabilen Werten (Patient=1 .. SystemAdmin=6)
+
+**src/PraxisFloeckinger.Core/Therapy/**
+- `TherapyMode.cs` — Enum (Anzug=1 .. Sportbegleitet=8)
+- `AppointmentStatus.cs` — Enum (Booked=1 .. NoShow=4)
+- `SlotStatus.cs` — Enum (Free=1 .. Blocked=3)
+- `EmergencyRequestStatus.cs` — Enum (Pending=1 .. CounterProposed=4)
+
+**src/PraxisFloeckinger.Core/Compliance/**
+- `AuditAction.cs` — Enum (Create=1 .. Print=8)
+
+**tests/PraxisFloeckinger.Tests/Core/**
+- `EntityBaseTests.cs` — 8 Tests: Id-Autogenerierung, distinct IDs, CreatedAt UTC, Soft-Delete-Defaults
+- `EnumStabilityTests.cs` — 6 Tests: pinnt alle Enum-Werte gegen versehentliches Umordnen
+
+**dotnet build** — 0 Warnings, 0 Errors
+**dotnet test** — 15/15 grün
+
+**Commit:** `ccd5f24 feat(core): add domain foundation with base entities, tenancy interfaces and stable enums`
+
+---
+
+## 2026-04-25 — Cleanup-Commit vor Schritt 2
+
+**CLAUDE.md** bereinigt
+- Doppelpunkt-Tippfehler (`nicht jetzt.. Sie`) behoben
+- Redundanten Old/-Absatz dedupliziert (stand zweimal drin)
+- Abschnitt "Aktueller Projekt-Stand" spiegelt jetzt Post-Schritt-1-Zustand wider (war bereits vom User vorbereitet)
+
+**dotnet build** — 0 Warnings, 0 Errors bestätigt
+
+**Commit:** `8a4d655 docs: clean up CLAUDE.md after step 1` → gepusht
+
+---
+
+## Session 1 — 2026-04-25
+
+### Solution-Skeleton aufgebaut
+
+**dotnet new sln -n PraxisFloeckinger**
+- Solution-Datei `PraxisFloeckinger.slnx` erstellt (neues slnx-Format, erzeugt durch .NET 10 SDK)
+
+**7 Projekte angelegt (dotnet new ...)**
+- `src/PraxisFloeckinger.Core/` — classlib, reine Domain-Schicht
+- `src/PraxisFloeckinger.Shared/` — classlib, DTOs und Konstanten
+- `src/PraxisFloeckinger.Infrastructure/` — classlib, EF Core / Repositories
+- `src/PraxisFloeckinger.Api/` — webapi, REST-API (Hetzner)
+- `src/PraxisFloeckinger.Web/` — web, Public Site + Patientenportal
+- `src/PraxisFloeckinger.Praxis/` — web, lokale Praxis-Software (Mac mini)
+- `tests/PraxisFloeckinger.Tests/` — xunit, Testprojekt
+
+**Projekt-Referenzen gesetzt**
+- Infrastructure → Core, Shared
+- Api → Infrastructure, Shared
+- Web → Shared
+- Praxis → Core, Shared (strikte Regel: niemals Api oder Infrastructure)
+- Tests → Core, Infrastructure, Shared
+
+**Directory.Build.props** erstellt (Solution-Root)
+- TargetFramework: net9.0
+- Nullable: enable
+- ImplicitUsings: enable
+- TreatWarningsAsErrors: true
+- EnforceCodeStyleInBuild: true
+- LangVersion: latest
+- NeutralLanguage: de-AT
+
+**Alle .csproj-Dateien bereinigt**
+- Doppelte Properties (TargetFramework, Nullable, ImplicitUsings) entfernt — kommen jetzt aus Directory.Build.props
+- `Microsoft.AspNetCore.OpenApi Version="10.0.7"` aus Api.csproj entfernt (net10.0-Paket, inkompatibel mit net9.0-Target)
+- `FluentAssertions 7.2.0` zu Tests.csproj hinzugefügt
+
+**src/PraxisFloeckinger.Api/Program.cs** ersetzt
+- Generierten WeatherForecast-Platzhalter durch minimalen Health-Endpoint ersetzt (kein OpenAPI-Package nötig)
+
+**.editorconfig** erstellt
+- .NET-Standard Code Style (var-Regeln, expression bodies, pattern matching)
+- Naming Conventions (Interface I-Prefix, private _camelCase, const PascalCase)
+
+**CLAUDE.md** ergänzt
+- Neuer Abschnitt "Projekt-Referenz-Regeln" mit erlaubten Abhängigkeiten und TODO für NetArchTest
+
+**docs/adr/_template.md** erstellt
+- ADR-Vorlage: Status / Context / Decision / Consequences / Alternatives Considered
+
+**docs/adr/0001-database-per-tenant.md** erstellt
+- ADR: Database-per-Tenant-Entscheidung dokumentiert (Begründung, Alternativen, Trade-offs)
+
+**.gitignore** erstellt
+- `dotnet new gitignore` (Standard .NET gitignore)
+- `PraxisFloeckinger/` Unterordner ausgeschlossen (verschachtelter alter Git-Repo-Versuch)
+
+**Git-Repository initialisiert**
+- `git init` — lokales Repo auf Branch `master`, dann zu `main` umbenannt
+- Erster Commit: `ee10364 chore: initialize solution skeleton`
+- Remote `origin` hinzugefügt: https://github.com/Ghostxprox/PraxisFloeckinger.git
+- `git push -u origin main` — Branch auf GitHub gepusht
